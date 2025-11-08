@@ -242,30 +242,55 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
 
   // Load Google Maps API
   useEffect(() => {
-    const loadGoogleMaps = () => {
-      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
-      if (!apiKey) {
-        console.error("Google Maps API key not found")
-        setApiLoaded(true)
-        return
-      }
-
-      if ((window as any).google?.maps) {
-        setApiLoaded(true)
-        return
-      }
-
-      const script = document.createElement("script")
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=visualization,geometry`
-      script.async = true
-      script.defer = true
-      script.onload = () => {
-        setApiLoaded(true)
-      }
-      document.head.appendChild(script)
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+    if (!apiKey) {
+      console.error("Google Maps API key not found")
+      setApiLoaded(true)
+      return
     }
 
-    loadGoogleMaps()
+    // Check if Google Maps is already loaded
+    if ((window as any).google?.maps) {
+      setApiLoaded(true)
+      return
+    }
+
+    // Check if script tag already exists in DOM
+    const existingScript = document.querySelector(
+      'script[src*="maps.googleapis.com/maps/api/js"]'
+    )
+    if (existingScript) {
+      // Script is already being loaded, wait for it
+      const checkGoogleMaps = setInterval(() => {
+        if ((window as any).google?.maps) {
+          clearInterval(checkGoogleMaps)
+          setApiLoaded(true)
+        }
+      }, 100)
+      
+      // Cleanup interval on unmount
+      return () => clearInterval(checkGoogleMaps)
+    }
+
+    // Create and add script tag
+    const script = document.createElement("script")
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=visualization,geometry`
+    script.async = true
+    script.defer = true
+    script.onload = () => {
+      setApiLoaded(true)
+    }
+    script.onerror = () => {
+      console.error("Failed to load Google Maps API")
+      setApiLoaded(true) // Set to true to prevent infinite retries
+    }
+    document.head.appendChild(script)
+
+    // Cleanup: remove script on unmount (optional, but good practice)
+    return () => {
+      // Don't remove the script as it might be used by other components
+      // The script will remain in the DOM, which is fine
+    }
   }, [])
 
   // Initialize map
@@ -371,7 +396,7 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
         map: mode === "pins" ? map.current : null,
       })
 
-      circles.current.set(incident.id, circle)
+      circles.current.set(String(incident.id), circle)
 
       // Create marker
       const marker = new google.maps.Marker({
@@ -386,7 +411,7 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
         map.current?.setZoom(13)
       })
 
-      markers.current.set(incident.id, marker)
+      markers.current.set(String(incident.id), marker)
     })
   }, [incidents, mapReady, mode, onIncidentSelect])
 
