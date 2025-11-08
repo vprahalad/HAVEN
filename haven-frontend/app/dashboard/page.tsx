@@ -171,7 +171,7 @@ export default function DashboardPage() {
             />
           ) : selectedIncident ? (
             <div className="bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden flex flex-col h-full">
-              <IncidentDetail incident={selectedIncident} onClose={handleCloseIncident} />
+              <IncidentDetail incident={selectedIncident} onClose={handleCloseIncident} isAdmin={false} />
             </div>
           ) : (
             <IncidentList selectedIncident={selectedIncident} onSelectIncident={handleIncidentSelect} />

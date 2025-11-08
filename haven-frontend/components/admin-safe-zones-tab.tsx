@@ -4,20 +4,23 @@ import type React from "react"
 
 import { useState } from "react"
 import useSWR, { mutate } from "swr"
-import { Shield, Plus } from "lucide-react"
-import { getSafeZones, createSafeZone } from "@/lib/api"
+import { Shield, Plus, Edit2, Trash2, X } from "lucide-react"
+import { getSafeZones, createSafeZone, updateSafeZone, deleteSafeZone } from "@/lib/api"
 import type { SafeZone } from "@/lib/types"
 
 export default function AdminSafeZonesTab() {
-  const { data: safeZones } = useSWR("/api/safe-zones", () => getSafeZones())
+  const { data: safeZones } = useSWR("/api/safe-zones?active=false", () => getSafeZones(false))
   const [showForm, setShowForm] = useState(false)
+  const [editingZone, setEditingZone] = useState<SafeZone | null>(null)
   const [loading, setLoading] = useState(false)
+  const [processing, setProcessing] = useState<number | string | null>(null)
   const [formData, setFormData] = useState({
     name: "",
     address: "",
     latitude: "",
     longitude: "",
     accessible: true,
+    active: true,
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -34,21 +37,72 @@ export default function AdminSafeZonesTab() {
     setLoading(true)
 
     try {
-      await createSafeZone({
-        name: formData.name,
-        address: formData.address,
-        latitude,
-        longitude,
-        accessible: formData.accessible,
-      })
+      if (editingZone) {
+        // Update existing safe zone
+        await updateSafeZone(editingZone.id, {
+          name: formData.name,
+          address: formData.address,
+          latitude,
+          longitude,
+          accessible: formData.accessible,
+          active: formData.active,
+        })
+      } else {
+        // Create new safe zone
+        await createSafeZone({
+          name: formData.name,
+          address: formData.address,
+          latitude,
+          longitude,
+          accessible: formData.accessible,
+        })
+      }
       mutate("/api/safe-zones")
-      setFormData({ name: "", address: "", latitude: "", longitude: "", accessible: true })
+      setFormData({ name: "", address: "", latitude: "", longitude: "", accessible: true, active: true })
       setShowForm(false)
+      setEditingZone(null)
     } catch (error) {
-      console.error("Error creating safe zone:", error)
+      console.error(`Error ${editingZone ? "updating" : "creating"} safe zone:`, error)
+      alert(`Failed to ${editingZone ? "update" : "create"} safe zone. Please try again.`)
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleEdit = (zone: SafeZone) => {
+    setEditingZone(zone)
+    setFormData({
+      name: zone.name,
+      address: zone.address,
+      latitude: zone.latitude.toString(),
+      longitude: zone.longitude.toString(),
+      accessible: zone.accessible,
+      active: zone.active,
+    })
+    setShowForm(true)
+  }
+
+  const handleDelete = async (zone: SafeZone) => {
+    if (!confirm(`Are you sure you want to delete "${zone.name}"? This action cannot be undone.`)) {
+      return
+    }
+
+    setProcessing(zone.id)
+    try {
+      await deleteSafeZone(zone.id)
+      mutate("/api/safe-zones")
+    } catch (error) {
+      console.error("Error deleting safe zone:", error)
+      alert("Failed to delete safe zone. Please try again.")
+    } finally {
+      setProcessing(null)
+    }
+  }
+
+  const handleCancel = () => {
+    setShowForm(false)
+    setEditingZone(null)
+    setFormData({ name: "", address: "", latitude: "", longitude: "", accessible: true, active: true })
   }
 
   return (
@@ -56,17 +110,36 @@ export default function AdminSafeZonesTab() {
       {/* Add Button */}
       <div className="p-4 border-b border-slate-700 bg-slate-900/50">
         <button
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => {
+            if (showForm) {
+              handleCancel()
+            } else {
+              setShowForm(true)
+              setEditingZone(null)
+            }
+          }}
           className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
         >
           <Plus className="w-4 h-4" />
-          Add Safe Zone
+          {editingZone ? "Cancel Edit" : "Add Safe Zone"}
         </button>
       </div>
 
       {/* Form */}
       {showForm && (
         <form onSubmit={handleSubmit} className="p-4 border-b border-slate-700 bg-slate-900/30 space-y-2">
+          {editingZone && (
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold text-slate-200">Editing: {editingZone.name}</h3>
+              <button
+                type="button"
+                onClick={handleCancel}
+                className="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
           <input
             type="text"
             placeholder="Name"
@@ -103,26 +176,39 @@ export default function AdminSafeZonesTab() {
               required
             />
           </div>
-          <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={formData.accessible}
-              onChange={(e) => setFormData({ ...formData, accessible: e.target.checked })}
-              className="rounded"
-            />
-            Wheelchair Accessible
-          </label>
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.accessible}
+                onChange={(e) => setFormData({ ...formData, accessible: e.target.checked })}
+                className="rounded"
+              />
+              Wheelchair Accessible
+            </label>
+            {editingZone && (
+              <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.active}
+                  onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
+                  className="rounded"
+                />
+                Active
+              </label>
+            )}
+          </div>
           <div className="flex gap-2 pt-2">
             <button
               type="submit"
               disabled={loading}
               className="flex-1 px-2 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-green-800 text-white rounded text-sm font-medium transition-colors"
             >
-              {loading ? "Creating..." : "Create"}
+              {loading ? (editingZone ? "Updating..." : "Creating...") : (editingZone ? "Update" : "Create")}
             </button>
             <button
               type="button"
-              onClick={() => setShowForm(false)}
+              onClick={handleCancel}
               className="flex-1 px-2 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm font-medium transition-colors"
             >
               Cancel
@@ -157,6 +243,24 @@ export default function AdminSafeZonesTab() {
                         <span className="px-1 py-0.5 rounded text-xs bg-slate-700 text-slate-300">Inactive</span>
                       )}
                     </div>
+                  </div>
+                  <div className="flex gap-1 flex-shrink-0">
+                    <button
+                      onClick={() => handleEdit(zone)}
+                      disabled={processing === zone.id}
+                      className="p-1 rounded hover:bg-slate-700 text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-50"
+                      title="Edit"
+                    >
+                      <Edit2 className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(zone)}
+                      disabled={processing === zone.id}
+                      className="p-1 rounded hover:bg-slate-700 text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+                      title="Delete"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
                   </div>
                 </div>
               </div>

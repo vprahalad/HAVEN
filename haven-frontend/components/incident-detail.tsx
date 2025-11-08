@@ -9,9 +9,10 @@ interface IncidentDetailProps {
   incident: Incident
   onClose: () => void
   onDelete?: () => void
+  isAdmin?: boolean
 }
 
-export default function IncidentDetail({ incident, onClose, onDelete }: IncidentDetailProps) {
+export default function IncidentDetail({ incident, onClose, onDelete, isAdmin = false }: IncidentDetailProps) {
   const [fullIncident, setFullIncident] = useState<Incident | null>(incident)
   const [loading, setLoading] = useState(!incident.reports)
   const [deleting, setDeleting] = useState(false)
@@ -107,22 +108,24 @@ export default function IncidentDetail({ incident, onClose, onDelete }: Incident
           <span>{mins < 1 ? "just now" : `${mins}m ago`}</span>
         </div>
 
-        {/* Clear Incident Button */}
-        <div className="border-t border-slate-700 pt-4">
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-red-600/30"
-          >
-            <Trash2 className="w-4 h-4" />
-            <span className="font-medium">
-              {deleting ? "Clearing..." : "Clear Incident"}
-            </span>
-          </button>
-          <p className="text-xs text-slate-500 mt-2 text-center">
-            Mark this incident as resolved and remove it from the system
-          </p>
-        </div>
+        {/* Clear Incident Button - Admin Only */}
+        {isAdmin && (
+          <div className="border-t border-slate-700 pt-4">
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-red-600/30"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span className="font-medium">
+                {deleting ? "Deleting..." : "Delete Incident"}
+              </span>
+            </button>
+            <p className="text-xs text-slate-500 mt-2 text-center">
+              Permanently delete this incident and all associated reports
+            </p>
+          </div>
+        )}
 
         {/* Reports Section */}
         <div className="border-t border-slate-700 pt-4">

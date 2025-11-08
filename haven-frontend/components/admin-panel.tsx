@@ -9,9 +9,10 @@ interface AdminPanelProps {
   tab: "incidents" | "safe-zones"
   onTabChange: (tab: "incidents" | "safe-zones") => void
   selectedIncident: Incident | null
+  onSelectIncident?: (incident: Incident | null) => void
 }
 
-export default function AdminPanel({ tab, onTabChange, selectedIncident }: AdminPanelProps) {
+export default function AdminPanel({ tab, onTabChange, selectedIncident, onSelectIncident }: AdminPanelProps) {
   const { data: incidents } = useSWR("/api/incidents", () => getIncidents(), {
     refreshInterval: 5000,
   })
@@ -48,6 +49,7 @@ export default function AdminPanel({ tab, onTabChange, selectedIncident }: Admin
             verifiedCount={verifiedCount}
             unverifiedCount={unverifiedCount}
             selectedIncident={selectedIncident}
+            onSelectIncident={onSelectIncident}
           />
         )}
         {tab === "safe-zones" && <AdminSafeZonesTab />}

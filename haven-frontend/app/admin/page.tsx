@@ -12,7 +12,7 @@ export default function AdminPage() {
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null)
   const [tab, setTab] = useState<"incidents" | "safe-zones">("incidents")
 
-  const handleIncidentSelect = useCallback((incident: Incident) => {
+  const handleIncidentSelect = useCallback((incident: Incident | null) => {
     setSelectedIncident(incident)
   }, [])
 
@@ -42,9 +42,15 @@ export default function AdminPage() {
               incident={selectedIncident} 
               onClose={handleCloseIncident}
               onDelete={handleIncidentDelete}
+              isAdmin={true}
             />
           ) : (
-            <AdminPanel tab={tab} onTabChange={setTab} selectedIncident={selectedIncident} />
+            <AdminPanel 
+              tab={tab} 
+              onTabChange={setTab} 
+              selectedIncident={selectedIncident}
+              onSelectIncident={handleIncidentSelect}
+            />
           )}
         </div>
       </div>

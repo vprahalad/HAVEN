@@ -1,28 +1,71 @@
 "use client"
 
-import useSWR from "swr"
-import { AlertTriangle } from "lucide-react"
-import { getIncidents } from "@/lib/api"
+import { useState } from "react"
+import useSWR, { mutate } from "swr"
+import { AlertTriangle, CheckCircle2, XCircle, Trash2 } from "lucide-react"
+import { getIncidents, verifyIncident, deleteIncident } from "@/lib/api"
 import type { Incident } from "@/lib/types"
 
 interface AdminIncidentsTabProps {
   verifiedCount: number
   unverifiedCount: number
   selectedIncident: Incident | null
+  onSelectIncident?: (incident: Incident | null) => void
 }
 
 export default function AdminIncidentsTab({
   verifiedCount,
   unverifiedCount,
   selectedIncident,
+  onSelectIncident,
 }: AdminIncidentsTabProps) {
   const { data: incidents } = useSWR("/api/incidents", () => getIncidents(), {
     refreshInterval: 5000,
   })
+  const [processing, setProcessing] = useState<number | null>(null)
 
   const sorted = [...(incidents || [])].sort(
     (a: Incident, b: Incident) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   )
+
+  const handleVerify = async (e: React.MouseEvent, incident: Incident, status: "verified" | "unverified") => {
+    e.stopPropagation()
+    if (!incident.id) return
+
+    setProcessing(incident.id as number)
+    try {
+      await verifyIncident(incident.id, status)
+      mutate("/api/incidents")
+    } catch (error) {
+      console.error("Failed to verify incident:", error)
+      alert(`Failed to ${status === "verified" ? "verify" : "unverify"} incident. Please try again.`)
+    } finally {
+      setProcessing(null)
+    }
+  }
+
+  const handleDelete = async (e: React.MouseEvent, incident: Incident) => {
+    e.stopPropagation()
+    if (!incident.id) return
+
+    if (!confirm(`Are you sure you want to delete this ${incident.hazard_type} incident? This action cannot be undone.`)) {
+      return
+    }
+
+    setProcessing(incident.id as number)
+    try {
+      await deleteIncident(incident.id)
+      mutate("/api/incidents")
+      if (selectedIncident?.id === incident.id && onSelectIncident) {
+        onSelectIncident(null) // Clear selection
+      }
+    } catch (error) {
+      console.error("Failed to delete incident:", error)
+      alert("Failed to delete incident. Please try again.")
+    } finally {
+      setProcessing(null)
+    }
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -53,13 +96,16 @@ export default function AdminIncidentsTab({
               return (
                 <div
                   key={incident.id}
-                  className={`p-2 rounded text-xs cursor-pointer transition-colors hover:bg-slate-700/30 ${
+                  className={`p-2 rounded text-xs transition-colors hover:bg-slate-700/30 ${
                     isSelected ? "bg-slate-700/50" : ""
                   }`}
                 >
                   <div className="flex items-start gap-2">
                     <AlertTriangle className="w-3 h-3 text-amber-400 mt-0.5 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
+                    <div 
+                      className="flex-1 min-w-0 cursor-pointer"
+                      onClick={() => onSelectIncident?.(incident)}
+                    >
                       <p className="font-semibold text-slate-100 capitalize truncate">{incident.hazard_type}</p>
                       <div className="flex gap-1 mt-0.5 flex-wrap">
                         <span
@@ -76,6 +122,35 @@ export default function AdminIncidentsTab({
                         </span>
                       </div>
                       <p className="text-slate-500 mt-0.5">{mins}m ago</p>
+                    </div>
+                    <div className="flex gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                      {incident.status === "verified" ? (
+                        <button
+                          onClick={(e) => handleVerify(e, incident, "unverified")}
+                          disabled={processing === incident.id}
+                          className="p-1 rounded hover:bg-slate-700 text-yellow-400 hover:text-yellow-300 transition-colors disabled:opacity-50"
+                          title="Unverify"
+                        >
+                          <XCircle className="w-3 h-3" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => handleVerify(e, incident, "verified")}
+                          disabled={processing === incident.id}
+                          className="p-1 rounded hover:bg-slate-700 text-green-400 hover:text-green-300 transition-colors disabled:opacity-50"
+                          title="Verify"
+                        >
+                          <CheckCircle2 className="w-3 h-3" />
+                        </button>
+                      )}
+                      <button
+                        onClick={(e) => handleDelete(e, incident)}
+                        disabled={processing === incident.id}
+                        className="p-1 rounded hover:bg-slate-700 text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
                     </div>
                   </div>
                 </div>

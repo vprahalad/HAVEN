@@ -331,6 +331,30 @@ def get_incident(incident_id):
         current_app.logger.error(f"Error getting incident: {str(e)}", exc_info=True)
         return jsonify({'error': 'Internal server error'}), 500
 
+@bp.route('/incidents/<int:incident_id>', methods=['PATCH'])
+def verify_incident(incident_id):
+    """Verify an incident (admin only)"""
+    try:
+        incident = Incident.query.get(incident_id)
+        if not incident:
+            return jsonify({'error': 'Incident not found'}), 404
+        
+        data = request.get_json() or {}
+        status = data.get('status', 'verified')
+        
+        if status not in ['verified', 'unverified']:
+            return jsonify({'error': 'Invalid status. Must be "verified" or "unverified"'}), 400
+        
+        incident.status = status
+        db.session.commit()
+        
+        current_app.logger.info(f"Updated incident {incident_id} status to {status}")
+        return jsonify(incident.to_dict()), 200
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error verifying incident {incident_id}: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
 @bp.route('/incidents/<int:incident_id>', methods=['DELETE'])
 def delete_incident(incident_id):
     """Delete an incident and all associated reports"""
@@ -433,6 +457,91 @@ def create_safe_zone():
     except Exception as e:
         current_app.logger.error(f"Error creating safe zone: {str(e)}", exc_info=True)
         return jsonify({'error': 'Internal server error'}), 500
+
+@bp.route('/safe-zones/<int:safe_zone_id>', methods=['PATCH'])
+def update_safe_zone(safe_zone_id):
+    """
+    Update a safe zone (admin only).
+    
+    JSON body (all fields optional):
+    - name (string)
+    - address (string)
+    - latitude (float)
+    - longitude (float)
+    - accessible (boolean)
+    - active (boolean)
+    """
+    try:
+        safe_zone = SafeZone.query.get(safe_zone_id)
+        if not safe_zone:
+            return jsonify({'error': 'Safe zone not found'}), 404
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'JSON body is required'}), 400
+        
+        # Update fields if provided
+        if 'name' in data:
+            safe_zone.name = data['name']
+        if 'address' in data:
+            safe_zone.address = data['address']
+        if 'accessible' in data:
+            safe_zone.accessible = bool(data['accessible'])
+        if 'active' in data:
+            safe_zone.active = bool(data['active'])
+        
+        # Handle coordinates - if either is provided, both must be provided
+        if 'latitude' in data or 'longitude' in data:
+            latitude = data.get('latitude')
+            longitude = data.get('longitude')
+            
+            if latitude is not None and longitude is not None:
+                try:
+                    lat = float(latitude)
+                    lon = float(longitude)
+                    safe_zone.latitude = lat
+                    safe_zone.longitude = lon
+                except (ValueError, TypeError):
+                    return jsonify({'error': 'Invalid latitude/longitude'}), 400
+            else:
+                return jsonify({'error': 'Both latitude and longitude must be provided together'}), 400
+        
+        # If address changed but coordinates not provided, geocode the new address
+        if 'address' in data and 'latitude' not in data and 'longitude' not in data:
+            geocoded_lat, geocoded_lon, normalized_address = geocode_address(safe_zone.address)
+            if geocoded_lat and geocoded_lon:
+                safe_zone.latitude = geocoded_lat
+                safe_zone.longitude = geocoded_lon
+                if normalized_address:
+                    safe_zone.address = normalized_address
+        
+        db.session.commit()
+        
+        current_app.logger.info(f"Updated safe zone {safe_zone_id}")
+        return jsonify(safe_zone.to_dict()), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error updating safe zone {safe_zone_id}: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
+@bp.route('/safe-zones/<int:safe_zone_id>', methods=['DELETE'])
+def delete_safe_zone(safe_zone_id):
+    """Delete a safe zone (admin only)"""
+    try:
+        safe_zone = SafeZone.query.get(safe_zone_id)
+        if not safe_zone:
+            return jsonify({'error': 'Safe zone not found'}), 404
+        
+        db.session.delete(safe_zone)
+        db.session.commit()
+        
+        current_app.logger.info(f"Deleted safe zone {safe_zone_id}")
+        return jsonify({'message': 'Safe zone deleted successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error deleting safe zone {safe_zone_id}: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
 @bp.route('/route', methods=['GET'])
 def get_route():
