@@ -98,7 +98,7 @@ python seed_db.py
 Create a `.env` file in the root directory:
 
 ```bash
-cp .env.example .env
+cp env.example .env
 ```
 
 Edit `.env` and set the following (optional for testing):
@@ -152,7 +152,7 @@ HAVEN/
 ├── init_db.py              # Database initialization script
 ├── seed_db.py              # Seed demo data
 ├── requirements.txt        # Python dependencies
-├── .env.example           # Environment variables template
+├── env.example            # Environment variables template
 └── README.md
 ```
 
@@ -175,7 +175,8 @@ HAVEN/
 - `GET /safe-zones` - List safe zones
   - Query params: `active` (true/false, default: true)
 - `POST /safe-zones` - Create a new safe zone
-  - JSON body: name, address, accessible (optional)
+  - JSON body: name (required), address (required), latitude (optional), longitude (optional), accessible (optional, default: true)
+  - If latitude/longitude are provided, they will be used; otherwise, address will be geocoded
 
 ### Routes
 - `GET /route?fromLat=<lat>&fromLng=<lng>` - Get route to nearest safe zone

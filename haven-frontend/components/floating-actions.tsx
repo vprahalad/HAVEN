@@ -22,8 +22,8 @@ export default function FloatingActions({ onHeatmapToggle, showHeatmap, onRouteF
         navigator.geolocation.getCurrentPosition(
           async (position) => {
             try {
-              const route = await getRoute(position.coords.latitude, position.coords.longitude)
-              onRouteFound(route)
+              const response = await getRoute(position.coords.latitude, position.coords.longitude)
+              onRouteFound(response.route)
             } catch (error) {
               console.error("Route fetch error:", error)
               // Show mock route for demo

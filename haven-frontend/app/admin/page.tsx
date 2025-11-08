@@ -1,9 +1,11 @@
 "use client"
 
 import { useState, useCallback } from "react"
+import { mutate } from "swr"
 import MapView from "@/components/map-view"
 import TopNav from "@/components/top-nav"
 import AdminPanel from "@/components/admin-panel"
+import IncidentDetail from "@/components/incident-detail"
 import type { Incident } from "@/lib/types"
 
 export default function AdminPage() {
@@ -12,6 +14,15 @@ export default function AdminPage() {
 
   const handleIncidentSelect = useCallback((incident: Incident) => {
     setSelectedIncident(incident)
+  }, [])
+
+  const handleCloseIncident = useCallback(() => {
+    setSelectedIncident(null)
+  }, [])
+
+  const handleIncidentDelete = useCallback(() => {
+    // Refresh the incidents list after deletion
+    mutate("/api/incidents")
   }, [])
 
   return (
@@ -26,7 +37,15 @@ export default function AdminPage() {
 
         {/* Admin Panel */}
         <div className="w-full md:w-96 rounded-lg border border-slate-700 bg-slate-800/50 backdrop-blur-sm overflow-hidden flex flex-col order-1 md:order-2">
-          <AdminPanel tab={tab} onTabChange={setTab} selectedIncident={selectedIncident} />
+          {selectedIncident ? (
+            <IncidentDetail 
+              incident={selectedIncident} 
+              onClose={handleCloseIncident}
+              onDelete={handleIncidentDelete}
+            />
+          ) : (
+            <AdminPanel tab={tab} onTabChange={setTab} selectedIncident={selectedIncident} />
+          )}
         </div>
       </div>
     </div>

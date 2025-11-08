@@ -11,6 +11,8 @@ interface MapViewProps {
   selectedIncident: Incident | null
   onIncidentSelect: (incident: Incident) => void
   route?: Route | null
+  onSafeZoneSelect?: (safeZone: SafeZone) => void
+  selectedSafeZone?: SafeZone | null
 }
 
 // Color helpers
@@ -214,11 +216,12 @@ const decodePolyline = (polyline: string): Array<{ lat: number; lng: number }> =
   }
 }
 
-export default function MapView({ mode, selectedIncident, onIncidentSelect, route }: MapViewProps) {
+export default function MapView({ mode, selectedIncident, onIncidentSelect, route, onSafeZoneSelect, selectedSafeZone }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<any>(null)
   const markers = useRef<Map<string, any>>(new Map())
   const circles = useRef<Map<string, any>>(new Map())
+  const safeZoneMarkers = useRef<Map<string, any>>(new Map())
   const heatmapLayer = useRef<any>(null)
   const polylineRef = useRef<any>(null)
   const userMarkerRef = useRef<any>(null)
@@ -340,20 +343,49 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
       icon: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
     })
 
-    // Generate and display evacuation route automatically
-    const evacuationRoute = generateEvacuationRoute(
-      DEFAULT_USER_LOCATION.lat,
-      DEFAULT_USER_LOCATION.lng,
-      safeZones,
-      incidents,
-    )
+    // Only generate and display automatic evacuation route if no route is provided
+    // (route prop takes precedence, e.g., when user clicks on a safe zone)
+    if (!route) {
+      const evacuationRoute = generateEvacuationRoute(
+        DEFAULT_USER_LOCATION.lat,
+        DEFAULT_USER_LOCATION.lng,
+        safeZones,
+        incidents,
+      )
 
-    // Display the polyline on map
+      // Display the polyline on map
+      if (polylineRef.current) {
+        polylineRef.current.setMap(null)
+      }
+
+      const waypoints = decodePolyline(evacuationRoute.polyline || "")
+      if (waypoints.length > 0) {
+        polylineRef.current = new google.maps.Polyline({
+          path: waypoints.map((wp) => ({ lat: wp.lat, lng: wp.lng })),
+          geodesic: true,
+          strokeColor: "#22c55e", // Green color
+          strokeOpacity: 0.8,
+          strokeWeight: 4,
+          map: map.current,
+        })
+      }
+    }
+  }, [mapReady, incidents, safeZones, route])
+
+  // Display route when route prop is provided
+  useEffect(() => {
+    if (!mapReady || !map.current || !route) return
+
+    const google = (window as any).google
+    if (!google?.maps) return
+
+    // Remove old polyline if exists
     if (polylineRef.current) {
       polylineRef.current.setMap(null)
     }
 
-    const waypoints = decodePolyline(evacuationRoute.polyline || "")
+    // Decode and display route polyline
+    const waypoints = decodePolyline(route.polyline || "")
     if (waypoints.length > 0) {
       polylineRef.current = new google.maps.Polyline({
         path: waypoints.map((wp) => ({ lat: wp.lat, lng: wp.lng })),
@@ -363,8 +395,21 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
         strokeWeight: 4,
         map: map.current,
       })
+    } else if (selectedSafeZone) {
+      // If no polyline but we have a selected safe zone, draw direct line
+      polylineRef.current = new google.maps.Polyline({
+        path: [
+          DEFAULT_USER_LOCATION,
+          { lat: selectedSafeZone.latitude, lng: selectedSafeZone.longitude },
+        ],
+        geodesic: true,
+        strokeColor: "#22c55e",
+        strokeOpacity: 0.8,
+        strokeWeight: 4,
+        map: map.current,
+      })
     }
-  }, [mapReady, incidents, safeZones])
+  }, [route, mapReady, selectedSafeZone])
 
   // Render incidents
   useEffect(() => {
@@ -456,17 +501,33 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
     const google = (window as any).google
     if (!google?.maps) return
 
+    // Clear old safe zone markers
+    safeZoneMarkers.current.forEach((marker) => marker.setMap(null))
+    safeZoneMarkers.current.clear()
+
     safeZones.forEach((zone: SafeZone) => {
       const position = { lat: zone.latitude, lng: zone.longitude }
 
-      new google.maps.Marker({
+      const marker = new google.maps.Marker({
         map: map.current,
         position,
         title: zone.name,
         icon: "http://maps.google.com/mapfiles/ms/icons/green-dot.png",
+        zIndex: selectedSafeZone?.id === zone.id ? 1000 : 100, // Higher z-index for selected safe zone
       })
+
+      // Add click listener to show safe zone name and trigger callback
+      marker.addListener("click", () => {
+        if (onSafeZoneSelect) {
+          onSafeZoneSelect(zone)
+          map.current?.panTo(position)
+          map.current?.setZoom(13)
+        }
+      })
+
+      safeZoneMarkers.current.set(String(zone.id), marker)
     })
-  }, [safeZones, mapReady])
+  }, [safeZones, mapReady, onSafeZoneSelect, selectedSafeZone])
 
   // Pan to selected incident
   useEffect(() => {

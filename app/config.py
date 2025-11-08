@@ -20,7 +20,7 @@ class Config:
     
     # Roboflow
     ROBOFLOW_API_KEY = os.environ.get('ROBOFLOW_API_KEY', '')
-    ROBOFLOW_MODEL_URL = os.environ.get('ROBOFLOW_MODEL_URL', '')
+    ROBOFLOW_MODEL_ID = os.environ.get('ROBOFLOW_MODEL_ID', '')
     
     # Google Maps
     GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')

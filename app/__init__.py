@@ -1,7 +1,7 @@
 """
 HAVEN Flask Application Factory
 """
-from flask import Flask
+from flask import Flask, send_from_directory
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from app.config import Config
@@ -27,7 +27,7 @@ def create_app(config_class=Config):
     
     # Register blueprints - API routes under /api prefix
     from app.routes import bp as routes_bp
-    app.register_blueprint(bp, url_prefix='/api')
+    app.register_blueprint(routes_bp, url_prefix='/api')
     
     # Register uploads route at root level (for direct access)
     @app.route('/uploads/<filename>', methods=['GET'])

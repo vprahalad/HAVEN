@@ -6,10 +6,11 @@ import type { Route } from "@/lib/types"
 
 interface RoutePanelProps {
   route: Route
+  safeZoneName?: string
   onClose: () => void
 }
 
-export default function RoutePanel({ route, onClose }: RoutePanelProps) {
+export default function RoutePanel({ route, safeZoneName, onClose }: RoutePanelProps) {
   const [speaking, setSpeaking] = useState(false)
 
   const handleSpeak = () => {
@@ -28,7 +29,7 @@ export default function RoutePanel({ route, onClose }: RoutePanelProps) {
       <div className="border-b border-slate-700 bg-slate-900/50 px-4 py-3 flex items-center justify-between">
         <h2 className="font-semibold text-slate-100 flex items-center gap-2">
           <Navigation className="w-4 h-4 text-blue-400" />
-          Safe Route
+          {safeZoneName ? `Route to ${safeZoneName}` : "Safe Route"}
         </h2>
         <button onClick={onClose} className="text-slate-400 hover:text-slate-200">
           <X className="w-4 h-4" />

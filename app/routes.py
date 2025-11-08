@@ -47,10 +47,18 @@ def get_or_create_user(external_id: str):
     return user
 
 def find_or_create_incident(lat: float, lon: float, hazard_type: str, severity: str, 
-                           address: str = None, max_distance_m: float = 400, 
-                           time_window_hours: int = 12):
+                           address: str = None, max_distance_m: float = 10, 
+                           time_window_hours: int = 1):
     """
     Find existing incident within distance and time window, or create new one.
+    
+    This function is intentionally conservative - it only groups reports if they are:
+    - Very close together (10m default, reduced from 400m to allow multiple incidents at same address)
+    - Same hazard type
+    - Within a short time window (1 hour default, reduced from 12 hours)
+    
+    This allows multiple distinct incidents at the same address while still preventing
+    duplicate reports of the exact same incident.
     
     Args:
         lat: Latitude
@@ -58,8 +66,8 @@ def find_or_create_incident(lat: float, lon: float, hazard_type: str, severity: 
         hazard_type: Type of hazard
         severity: Severity level
         address: Address string
-        max_distance_m: Maximum distance in meters to consider same incident
-        time_window_hours: Time window in hours to consider same incident
+        max_distance_m: Maximum distance in meters to consider same incident (default: 50m)
+        time_window_hours: Time window in hours to consider same incident (default: 1 hour)
     
     Returns:
         Incident object
@@ -67,20 +75,22 @@ def find_or_create_incident(lat: float, lon: float, hazard_type: str, severity: 
     # Calculate time threshold
     time_threshold = datetime.utcnow() - timedelta(hours=time_window_hours)
     
-    # Find existing incidents with same hazard type
+    # Find existing incidents with same hazard type within time window
     existing_incidents = Incident.query.filter(
         Incident.hazard_type == hazard_type,
         Incident.created_at >= time_threshold
     ).all()
     
-    # Check distance for each incident
+    # Check distance for each incident - only group if very close (likely same exact incident)
     for incident in existing_incidents:
         distance = haversine(lat, lon, incident.latitude, incident.longitude)
         if distance <= max_distance_m:
-            # Found existing incident within range
+            # Found existing incident very close by - likely the same incident
+            current_app.logger.info(f"Grouping report with existing incident {incident.id} (distance: {distance:.1f}m)")
             return incident
     
     # No existing incident found, create new one
+    # This allows multiple incidents at the same address if they're different hazards or far enough apart
     impact_radius = impact_radius_for_severity(severity)
     incident = Incident(
         hazard_type=hazard_type,
@@ -93,6 +103,7 @@ def find_or_create_incident(lat: float, lon: float, hazard_type: str, severity: 
     )
     db.session.add(incident)
     db.session.commit()
+    current_app.logger.info(f"Created new incident {incident.id} for {hazard_type} at {address or f'{lat},{lon}'}")
     return incident
 
 def verify_incident(incident: Incident):
@@ -144,11 +155,15 @@ def create_report():
     Request: multipart/form-data
     - image (file, required)
     - description (string, optional)
-    - address (string, optional)
-    - latitude (float, optional)
-    - longitude (float, optional)
+    - address (string, optional) - Either address OR coordinates required
+    - latitude (float, optional) - Either address OR coordinates required
+    - longitude (float, optional) - Either address OR coordinates required
     - user_external_id (string, optional)
     - source (string, optional; default "citizen")
+    
+    Note: Location can be provided as either:
+    - Coordinates (latitude + longitude), OR
+    - Address (will be geocoded to coordinates)
     """
     try:
         # Get form data
@@ -170,45 +185,62 @@ def create_report():
         
         image_url = f'/uploads/{filename}'
         
-        # Determine location (lat/lon/address)
+        # Determine location - either coordinates OR address is required (not both)
         lat = None
         lon = None
         
+        # Check if coordinates are provided
         if latitude and longitude:
             try:
                 lat = float(latitude)
                 lon = float(longitude)
             except ValueError:
-                return jsonify({'error': 'Invalid latitude/longitude'}), 400
+                return jsonify({'error': 'Invalid latitude/longitude values'}), 400
         
-        # If we have address but no coords, geocode
+        # If we have address but no coordinates, geocode the address
         if address and (lat is None or lon is None):
             geocoded_lat, geocoded_lon, normalized_address = geocode_address(address)
             if geocoded_lat and geocoded_lon:
                 lat = geocoded_lat
                 lon = geocoded_lon
-                if not address:  # Use normalized address if original was empty
+                # Use normalized address if available
+                if normalized_address:
                     address = normalized_address
             else:
-                return jsonify({'error': 'Could not geocode address. Please provide coordinates.'}), 400
+                return jsonify({
+                    'error': 'Could not geocode the provided address. Please provide valid coordinates (latitude/longitude) instead, or check that your address is correct.'
+                }), 400
         
-        # If we have coords but no address, optionally reverse geocode
+        # If we have coordinates but no address, optionally reverse geocode
         if lat and lon and not address:
             # Optional: uncomment to enable reverse geocoding
             # address = reverse_geocode(lat, lon) or ''
             pass
         
-        # Must have coordinates at this point
+        # Final validation: must have coordinates at this point (either provided directly or from geocoding)
         if lat is None or lon is None:
-            return jsonify({'error': 'Location is required (latitude/longitude or address)'}), 400
+            return jsonify({
+                'error': 'Location is required. Please provide either coordinates (latitude/longitude) OR an address.'
+            }), 400
         
         # Get or create user
         user = get_or_create_user(user_external_id) if user_external_id else None
         
         # Classify image using Roboflow
-        hazard_type, severity, confidence = classify_image(filepath)
-        if not hazard_type:
-            return jsonify({'error': 'Failed to classify image'}), 500
+        try:
+            hazard_type, severity, confidence = classify_image(filepath)
+            if not hazard_type:
+                current_app.logger.error("Image classification returned None - this should not happen with fallback")
+                return jsonify({
+                    'error': 'Failed to classify image. Please check server logs for details.',
+                    'details': 'Roboflow classification failed and fallback also failed. Check that ROBOFLOW_API_KEY and ROBOFLOW_MODEL_URL are set correctly in your .env file.'
+                }), 500
+        except Exception as e:
+            current_app.logger.error(f"Exception during image classification: {str(e)}", exc_info=True)
+            return jsonify({
+                'error': 'Failed to classify image',
+                'details': f'Classification error: {str(e)}'
+            }), 500
         
         # Find or create incident
         incident = find_or_create_incident(lat, lon, hazard_type, severity, address)
@@ -299,6 +331,25 @@ def get_incident(incident_id):
         current_app.logger.error(f"Error getting incident: {str(e)}", exc_info=True)
         return jsonify({'error': 'Internal server error'}), 500
 
+@bp.route('/incidents/<int:incident_id>', methods=['DELETE'])
+def delete_incident(incident_id):
+    """Delete an incident and all associated reports"""
+    try:
+        incident = Incident.query.get(incident_id)
+        if not incident:
+            return jsonify({'error': 'Incident not found'}), 404
+        
+        # Delete the incident (cascade will handle reports due to cascade='all, delete-orphan')
+        db.session.delete(incident)
+        db.session.commit()
+        
+        current_app.logger.info(f"Deleted incident {incident_id}")
+        return jsonify({'message': 'Incident deleted successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error deleting incident {incident_id}: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
 @bp.route('/safe-zones', methods=['GET'])
 def list_safe_zones():
     """List safe zones (active only by default)"""
@@ -323,6 +374,8 @@ def create_safe_zone():
     JSON body:
     - name (string, required)
     - address (string, required)
+    - latitude (float, optional) - if provided, will be used instead of geocoding
+    - longitude (float, optional) - if provided, will be used instead of geocoding
     - accessible (boolean, optional, default True)
     """
     try:
@@ -332,6 +385,8 @@ def create_safe_zone():
         
         name = data.get('name')
         address = data.get('address')
+        latitude = data.get('latitude')
+        longitude = data.get('longitude')
         accessible = data.get('accessible', True)
         
         if not name:
@@ -339,14 +394,27 @@ def create_safe_zone():
         if not address:
             return jsonify({'error': 'Address is required'}), 400
         
-        # Geocode address
-        lat, lon, normalized_address = geocode_address(address)
-        if not lat or not lon:
-            return jsonify({'error': 'Could not geocode address'}), 400
+        # Use provided coordinates or geocode address
+        lat = None
+        lon = None
         
-        # Use normalized address if available
-        if normalized_address:
-            address = normalized_address
+        if latitude is not None and longitude is not None:
+            try:
+                lat = float(latitude)
+                lon = float(longitude)
+            except (ValueError, TypeError):
+                return jsonify({'error': 'Invalid latitude/longitude'}), 400
+        
+        # If no coordinates provided, geocode address
+        if lat is None or lon is None:
+            geocoded_lat, geocoded_lon, normalized_address = geocode_address(address)
+            if not geocoded_lat or not geocoded_lon:
+                return jsonify({'error': 'Could not geocode address. Please provide coordinates.'}), 400
+            lat = geocoded_lat
+            lon = geocoded_lon
+            # Use normalized address if available
+            if normalized_address:
+                address = normalized_address
         
         # Create safe zone
         safe_zone = SafeZone(
@@ -369,15 +437,17 @@ def create_safe_zone():
 @bp.route('/route', methods=['GET'])
 def get_route():
     """
-    Get route to nearest safe zone.
+    Get route to safe zone.
     
     Query params:
     - fromLat (float, required)
     - fromLng (float, required)
+    - safeZoneId (int, optional) - If provided, route to this specific safe zone. Otherwise, find nearest.
     """
     try:
         from_lat = request.args.get('fromLat')
         from_lng = request.args.get('fromLng')
+        safe_zone_id = request.args.get('safeZoneId')
         
         if not from_lat or not from_lng:
             return jsonify({'error': 'fromLat and fromLng are required'}), 400
@@ -388,19 +458,35 @@ def get_route():
         except ValueError:
             return jsonify({'error': 'Invalid fromLat/fromLng'}), 400
         
-        # Find active safe zones
-        safe_zones = SafeZone.query.filter(SafeZone.active == True).all()
-        if not safe_zones:
-            return jsonify({'error': 'No active safe zones available'}), 404
-        
-        # Find nearest safe zone
+        # Find target safe zone
         best_zone = None
-        best_dist = float('inf')
-        for zone in safe_zones:
-            dist = haversine(from_lat, from_lng, zone.latitude, zone.longitude)
-            if dist < best_dist:
-                best_dist = dist
-                best_zone = zone
+        best_dist = None
+        
+        if safe_zone_id:
+            # Route to specific safe zone
+            try:
+                safe_zone_id = int(safe_zone_id)
+                best_zone = SafeZone.query.filter(
+                    SafeZone.id == safe_zone_id,
+                    SafeZone.active == True
+                ).first()
+                if not best_zone:
+                    return jsonify({'error': 'Safe zone not found or not active'}), 404
+                best_dist = haversine(from_lat, from_lng, best_zone.latitude, best_zone.longitude)
+            except (ValueError, TypeError):
+                return jsonify({'error': 'Invalid safeZoneId'}), 400
+        else:
+            # Find nearest safe zone
+            safe_zones = SafeZone.query.filter(SafeZone.active == True).all()
+            if not safe_zones:
+                return jsonify({'error': 'No active safe zones available'}), 404
+            
+            best_dist = float('inf')
+            for zone in safe_zones:
+                dist = haversine(from_lat, from_lng, zone.latitude, zone.longitude)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_zone = zone
         
         # Construct Google Maps URL
         google_maps_url = (

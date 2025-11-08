@@ -43,6 +43,7 @@ export default function ReportForm({ onSubmit }: ReportFormProps) {
             lng: position.coords.longitude,
           })
           setUseCurrentLocation(true)
+          setAddress("") // Clear address when using current location
           setLoading(false)
         },
         (error) => {
@@ -51,6 +52,45 @@ export default function ReportForm({ onSubmit }: ReportFormProps) {
         },
       )
     }
+  }
+
+  const parseCoordinates = (input: string): { lat: number; lng: number } | null => {
+    // Try to parse coordinates in various formats:
+    // "lat, lng" or "lat,lng" or "lat, lng"
+    const trimmed = input.trim()
+    
+    // Match patterns like: "40.7128, -74.0060" or "40.7128,-74.0060" or "40.7128 -74.0060"
+    const coordPattern = /^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/
+    const match = trimmed.match(coordPattern)
+    
+    if (match) {
+      const lat = parseFloat(match[1])
+      const lng = parseFloat(match[2])
+      
+      // Validate coordinate ranges
+      if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+        return { lat, lng }
+      }
+    }
+    
+    return null
+  }
+
+  const handleAddressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    setAddress(value)
+    setError("")
+    
+    // Try to parse as coordinates
+    const coords = parseCoordinates(value)
+    if (coords) {
+      setLocation(coords)
+      setUseCurrentLocation(false)
+    } else if (value.trim() === "") {
+      // Clear location if address is cleared
+      setLocation(null)
+    }
+    // If it's not coordinates, keep it as address (will be geocoded by backend)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -63,15 +103,25 @@ export default function ReportForm({ onSubmit }: ReportFormProps) {
         throw new Error("Please select an image")
       }
 
-      if (!location) {
-        throw new Error("Please provide a location")
+      // Validate that either location (coordinates) or address is provided
+      if (!location && (!address || !address.trim())) {
+        throw new Error("Please provide a location (coordinates or address)")
       }
 
       const formData = new FormData()
       formData.append("image", image)
       formData.append("description", description)
-      formData.append("latitude", location.lat.toString())
-      formData.append("longitude", location.lng.toString())
+      
+      // If location is set (from coordinates or current location), use it
+      if (location) {
+        formData.append("latitude", location.lat.toString())
+        formData.append("longitude", location.lng.toString())
+      }
+      
+      // If address is provided and not coordinates, send it for geocoding
+      if (address && address.trim() && !parseCoordinates(address)) {
+        formData.append("address", address.trim())
+      }
 
       const result = await postReport(formData)
       onSubmit(result)
@@ -134,7 +184,15 @@ export default function ReportForm({ onSubmit }: ReportFormProps) {
               <p className="text-sm font-medium text-slate-100">
                 {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
               </p>
-              {address && <p className="text-xs text-slate-400">{address}</p>}
+              {address && !parseCoordinates(address) && <p className="text-xs text-slate-400">{address}</p>}
+            </div>
+          </div>
+        ) : address && address.trim() && !parseCoordinates(address) ? (
+          <div className="bg-slate-900 border border-slate-700 rounded-lg p-3 flex items-center gap-2">
+            <MapPin className="w-4 h-4 text-yellow-400" />
+            <div>
+              <p className="text-sm font-medium text-slate-100">Address: {address}</p>
+              <p className="text-xs text-slate-400">Will be geocoded on submit</p>
             </div>
           </div>
         ) : (
@@ -152,11 +210,16 @@ export default function ReportForm({ onSubmit }: ReportFormProps) {
           </button>
           <input
             type="text"
-            placeholder="Or enter address"
+            placeholder="Or enter address or coordinates (e.g., 40.7128, -74.0060)"
             value={address}
-            onChange={(e) => setAddress(e.target.value)}
+            onChange={handleAddressChange}
             className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-600"
           />
+          {location && !useCurrentLocation && (
+            <p className="text-xs text-slate-400">
+              Coordinates detected: {location.lat.toFixed(6)}, {location.lng.toFixed(6)}
+            </p>
+          )}
         </div>
       </div>
 
@@ -167,7 +230,7 @@ export default function ReportForm({ onSubmit }: ReportFormProps) {
       {/* Submit Button */}
       <button
         type="submit"
-        disabled={loading || !image || !location}
+        disabled={loading || !image || (!location && !address?.trim())}
         className="w-full px-4 py-3 bg-red-600 hover:bg-red-700 disabled:bg-red-800 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
       >
         {loading ? (
