@@ -1,11 +1,11 @@
-services:
+databases:
   # PostgreSQL Database
-  - type: pspg
-    name: haven-database
-    plan: free
+  - name: haven-database
     databaseName: haven
     user: haven_user
+    plan: free
 
+services:
   # Flask Backend API
   - type: web
     name: haven-backend
