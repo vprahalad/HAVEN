@@ -1,0 +1,4 @@
+# Vercel will use the root requirements.txt
+# This file is here for reference
+# All dependencies should be in /requirements.txt
+

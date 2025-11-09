@@ -1,0 +1,19 @@
+{
+  "buildCommand": "cd haven-frontend && npm install && npm run build",
+  "outputDirectory": "haven-frontend/.next",
+  "installCommand": "cd haven-frontend && npm install",
+  "framework": "nextjs",
+  "rootDirectory": "haven-frontend",
+  "functions": {
+    "api/[...path].py": {
+      "runtime": "python3.12"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    }
+  ]
+}
+

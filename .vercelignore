@@ -1,0 +1,50 @@
+# Python virtual environments (keep the code, exclude venv)
+venv/
+haven-backend/venv/
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database files (will use /tmp in serverless)
+*.db
+*.sqlite
+*.sqlite3
+instance/
+
+# Uploads directory (will use /tmp in serverless)
+uploads/
+
+# Documentation (keep minimal)
+*.md
+!haven-frontend/README.md
+!README.md
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Environment files (use Vercel environment variables)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# Development scripts (not needed in production)
+run.py
+run_unified.py
+start.sh
+build_and_serve.py
+check_prerequisites.py
+setup.sh
+
+# Images directory (if not needed for frontend)
+images/
+

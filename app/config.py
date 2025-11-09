@@ -12,7 +12,13 @@ class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
     
     # Database
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///haven.db'
+    # In serverless (Vercel), use /tmp for SQLite or a cloud database
+    if os.environ.get('VERCEL'):
+        # Vercel serverless environment - use /tmp for SQLite or cloud DB
+        db_path = os.environ.get('DATABASE_URL') or 'sqlite:////tmp/haven.db'
+        SQLALCHEMY_DATABASE_URI = db_path
+    else:
+        SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///haven.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # CORS
@@ -26,7 +32,11 @@ class Config:
     GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
     
     # File uploads
-    UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads')
+    # In serverless (Vercel), use /tmp directory (ephemeral)
+    if os.environ.get('VERCEL'):
+        UPLOAD_FOLDER = '/tmp/uploads'
+    else:
+        UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads')
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
