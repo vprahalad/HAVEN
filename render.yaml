@@ -39,9 +39,8 @@ services:
     name: haven-frontend
     env: node
     plan: free
-    rootDir: haven-frontend
-    buildCommand: npm install && npm run build
-    startCommand: npm start
+    buildCommand: cd haven-frontend && npm install && npm run build
+    startCommand: cd haven-frontend && npm start
     envVars:
       - key: NODE_VERSION
         value: 20.x
