@@ -9,7 +9,12 @@ const nextConfig = {
   // Configure API proxy - all /api/* requests go to Flask backend
   async rewrites() {
     // Use environment variable for backend URL in production, localhost in development
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+    let backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+    
+    // If backendUrl doesn't have protocol, add https:// (for Render host property)
+    if (backendUrl && !backendUrl.startsWith('http://') && !backendUrl.startsWith('https://')) {
+      backendUrl = `https://${backendUrl}`;
+    }
     
     return [
       {

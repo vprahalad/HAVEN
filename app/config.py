@@ -27,7 +27,13 @@ class Config:
         CORS_ORIGINS = '*'
     else:
         # Split by comma and strip whitespace
-        CORS_ORIGINS = [origin.strip() for origin in frontend_origin.split(',')]
+        origins = [origin.strip() for origin in frontend_origin.split(',')]
+        # If origin doesn't have protocol, add https:// (for Render host property)
+        CORS_ORIGINS = []
+        for origin in origins:
+            if origin and not origin.startswith(('http://', 'https://')):
+                origin = f'https://{origin}'
+            CORS_ORIGINS.append(origin)
     
     # Roboflow
     ROBOFLOW_API_KEY = os.environ.get('ROBOFLOW_API_KEY', '')
