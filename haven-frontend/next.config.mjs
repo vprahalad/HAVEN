@@ -12,6 +12,12 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Turbopack configuration for path aliases (fallback if turbopack is used)
+  turbopack: {
+    resolveAlias: {
+      '@': path.resolve(__dirname),
+    },
+  },
   // Explicit webpack configuration for path aliases
   webpack: (config) => {
     config.resolve.alias = {
