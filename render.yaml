@@ -1,6 +1,6 @@
 services:
   # PostgreSQL Database
-  - type: pg
+  - type: pspg
     name: haven-database
     plan: free
     databaseName: haven
