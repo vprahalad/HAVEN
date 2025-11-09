@@ -12,18 +12,29 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  // Turbopack configuration for path aliases (fallback if turbopack is used)
+  // Turbopack configuration for path aliases
   turbopack: {
     resolveAlias: {
       '@': path.resolve(__dirname),
     },
   },
   // Explicit webpack configuration for path aliases
-  webpack: (config) => {
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      '@': path.resolve(__dirname),
-    };
+  webpack: (config, { dir }) => {
+    // dir is the absolute path to the project root (haven-frontend when rootDir is set)
+    const projectRoot = path.resolve(dir);
+    
+    // Override the @ alias to point to project root
+    // This must match tsconfig.json paths configuration
+    if (!config.resolve) {
+      config.resolve = {};
+    }
+    if (!config.resolve.alias) {
+      config.resolve.alias = {};
+    }
+    
+    // Set the alias - this will resolve @/lib/api to {projectRoot}/lib/api
+    config.resolve.alias['@'] = projectRoot;
+    
     return config;
   },
   // Configure API proxy - all /api/* requests go to Flask backend
