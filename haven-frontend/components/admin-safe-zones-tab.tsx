@@ -90,10 +90,20 @@ export default function AdminSafeZonesTab() {
     setProcessing(zone.id)
     try {
       await deleteSafeZone(zone.id)
+      // Refresh the safe zones list
+      mutate("/api/safe-zones?active=false")
       mutate("/api/safe-zones")
     } catch (error) {
       console.error("Error deleting safe zone:", error)
-      alert("Failed to delete safe zone. Please try again.")
+      const errorMessage = error instanceof Error ? error.message : "Unknown error"
+      if (errorMessage.includes("not found")) {
+        // Safe zone was already deleted, refresh the list
+        mutate("/api/safe-zones?active=false")
+        mutate("/api/safe-zones")
+        alert("Safe zone was not found. It may have already been deleted. The list has been refreshed.")
+      } else {
+        alert(`Failed to delete safe zone: ${errorMessage}`)
+      }
     } finally {
       setProcessing(null)
     }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import MapView from "@/components/map-view"
 import IncidentList from "@/components/incident-list"
 import IncidentDetail from "@/components/incident-detail"
@@ -22,6 +22,25 @@ export default function DashboardPage() {
   const [route, setRoute] = useState<Route | null>(null)
   const [selectedSafeZone, setSelectedSafeZone] = useState<SafeZone | null>(null)
   const [routeLoading, setRouteLoading] = useState(false)
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number }>(DEFAULT_USER_LOCATION)
+
+  // Get user's current location on mount
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setUserLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          })
+        },
+        (error) => {
+          console.error("Geolocation error:", error)
+          // Keep default location if geolocation fails
+        }
+      )
+    }
+  }, [])
 
   const handleIncidentSelect = useCallback((incident: Incident) => {
     setSelectedIncident(incident)
@@ -39,102 +58,50 @@ export default function DashboardPage() {
     setRouteLoading(true)
     
     try {
-      // Get user's current location or use default
-      let userLat = DEFAULT_USER_LOCATION.lat
-      let userLng = DEFAULT_USER_LOCATION.lng
+      // Use the stored user location
+      const userLat = userLocation.lat
+      const userLng = userLocation.lng
       
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          async (position) => {
-            userLat = position.coords.latitude
-            userLng = position.coords.longitude
-            
-            try {
-              const response = await getRoute(userLat, userLng, safeZone.id)
-              // Add polyline to route for map display
-              const routeWithPolyline: Route = {
-                ...response.route,
-                polyline: JSON.stringify([
-                  { lat: userLat, lng: userLng },
-                  { lat: safeZone.latitude, lng: safeZone.longitude },
-                ]),
-              }
-              setRoute(routeWithPolyline)
-            } catch (error) {
-              console.error("Error fetching route:", error)
-              // Fallback: create a simple route
-              const distance = Math.sqrt(
-                Math.pow((userLat - safeZone.latitude) * 111, 2) +
-                Math.pow((userLng - safeZone.longitude) * 111 * Math.cos(userLat * Math.PI / 180), 2)
-              ) * 1000 // Convert to meters
-              const routeWithPolyline: Route = {
-                distance,
-                duration: Math.round((distance / 1000 / 5) * 3600), // 5 km/h walking speed
-                steps: [
-                  {
-                    instruction: `Head towards ${safeZone.name}`,
-                    distance,
-                    duration: Math.round((distance / 1000 / 5) * 3600),
-                  },
-                  {
-                    instruction: `Arrive at ${safeZone.name}`,
-                    distance: 0,
-                    duration: 0,
-                  },
-                ],
-                polyline: JSON.stringify([
-                  { lat: userLat, lng: userLng },
-                  { lat: safeZone.latitude, lng: safeZone.longitude },
-                ]),
-              }
-              setRoute(routeWithPolyline)
-            } finally {
-              setRouteLoading(false)
-            }
-          },
-          async (error) => {
-            console.error("Geolocation error:", error)
-            // Use default location
-            try {
-              const response = await getRoute(DEFAULT_USER_LOCATION.lat, DEFAULT_USER_LOCATION.lng, safeZone.id)
-              const routeWithPolyline: Route = {
-                ...response.route,
-                polyline: JSON.stringify([
-                  { lat: DEFAULT_USER_LOCATION.lat, lng: DEFAULT_USER_LOCATION.lng },
-                  { lat: safeZone.latitude, lng: safeZone.longitude },
-                ]),
-              }
-              setRoute(routeWithPolyline)
-            } catch (err) {
-              console.error("Error fetching route:", err)
-            } finally {
-              setRouteLoading(false)
-            }
-          }
-        )
-      } else {
-        // No geolocation, use default
-        try {
-          const response = await getRoute(DEFAULT_USER_LOCATION.lat, DEFAULT_USER_LOCATION.lng, safeZone.id)
-          const routeWithPolyline: Route = {
-            ...response.route,
-            polyline: JSON.stringify([
-              { lat: DEFAULT_USER_LOCATION.lat, lng: DEFAULT_USER_LOCATION.lng },
-              { lat: safeZone.latitude, lng: safeZone.longitude },
-            ]),
-          }
-          setRoute(routeWithPolyline)
-        } catch (error) {
-          console.error("Error fetching route:", error)
-        } finally {
-          setRouteLoading(false)
+      try {
+        const response = await getRoute(userLat, userLng, safeZone.id)
+        // Use polyline from API response (already includes actual route path)
+        setRoute(response.route)
+      } catch (error) {
+        console.error("Error fetching route:", error)
+        // Fallback: create a simple route
+        const distance = Math.sqrt(
+          Math.pow((userLat - safeZone.latitude) * 111, 2) +
+          Math.pow((userLng - safeZone.longitude) * 111 * Math.cos(userLat * Math.PI / 180), 2)
+        ) * 1000 // Convert to meters
+        const routeWithPolyline: Route = {
+          distance,
+          duration: Math.round((distance / 1000 / 5) * 3600), // 5 km/h walking speed
+          steps: [
+            {
+              instruction: `Head towards ${safeZone.name}`,
+              distance,
+              duration: Math.round((distance / 1000 / 5) * 3600),
+            },
+            {
+              instruction: `Arrive at ${safeZone.name}`,
+              distance: 0,
+              duration: 0,
+            },
+          ],
+          polyline: JSON.stringify([
+            { lat: userLat, lng: userLng },
+            { lat: safeZone.latitude, lng: safeZone.longitude },
+          ]),
         }
+        setRoute(routeWithPolyline)
+      } finally {
+        setRouteLoading(false)
       }
     } catch (error) {
       console.error("Error in safe zone selection:", error)
       setRouteLoading(false)
     }
-  }, [])
+  }, [userLocation])
 
   return (
     <div className="h-screen bg-slate-900 flex flex-col">

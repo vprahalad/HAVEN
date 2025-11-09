@@ -223,10 +223,45 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
   const circles = useRef<Map<string, any>>(new Map())
   const safeZoneMarkers = useRef<Map<string, any>>(new Map())
   const heatmapLayer = useRef<any>(null)
+  const heatmapLayers = useRef<Map<string, any>>(new Map())
   const polylineRef = useRef<any>(null)
   const userMarkerRef = useRef<any>(null)
   const [mapReady, setMapReady] = useState(false)
   const [apiLoaded, setApiLoaded] = useState(false)
+  const [zoomLevel, setZoomLevel] = useState(11)
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null)
+
+  // Helper function to get radius range in meters based on hazard type
+  // Uses a seeded random based on incident ID to ensure consistency
+  const getRadiusForHazardType = (hazardType: string, incidentId: string | number): number => {
+    const normalizedType = hazardType.toLowerCase().trim()
+    
+    // Create a simple seeded random function based on incident ID
+    const seed = String(incidentId).split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)
+    const seededRandom = () => {
+      const x = Math.sin(seed) * 10000
+      return x - Math.floor(x)
+    }
+    
+    let minRadius = 100
+    let maxRadius = 1000
+    
+    if (normalizedType.includes("forestfire") || normalizedType.includes("forest fire") || normalizedType.includes("fire")) {
+      minRadius = 100
+      maxRadius = 1000
+    } else if (normalizedType.includes("earthquake")) {
+      minRadius = 100
+      maxRadius = 1000
+    } else if (normalizedType.includes("sinkhole")) {
+      minRadius = 25
+      maxRadius = 100
+    } else if (normalizedType.includes("flooding") || normalizedType.includes("flood")) {
+      minRadius = 100
+      maxRadius = 1000
+    }
+    
+    return seededRandom() * (maxRadius - minRadius) + minRadius
+  }
 
   const { data: incidents } = useSWR("/api/incidents", () => getIncidents(), {
     refreshInterval: 5000,
@@ -242,6 +277,28 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
       // Use mock data if API fails
     },
   })
+
+  // Get user's current location
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setUserLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          })
+        },
+        (error) => {
+          console.error("Geolocation error:", error)
+          // Fallback to default location
+          setUserLocation(DEFAULT_USER_LOCATION)
+        }
+      )
+    } else {
+      // Geolocation not supported, use default
+      setUserLocation(DEFAULT_USER_LOCATION)
+    }
+  }, [])
 
   // Load Google Maps API
   useEffect(() => {
@@ -298,7 +355,7 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
 
   // Initialize map
   useEffect(() => {
-    if (!mapContainer.current || !apiLoaded || mapReady) return
+    if (!mapContainer.current || !apiLoaded || mapReady || !userLocation) return
 
     const google = (window as any).google
     if (!google?.maps) {
@@ -309,7 +366,7 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
     }
 
     const mapOptions = {
-      center: DEFAULT_USER_LOCATION,
+      center: userLocation,
       zoom: 11,
       styles: [
         { elementType: "geometry", stylers: [{ color: "#1e293b" }] },
@@ -321,11 +378,22 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
     }
 
     map.current = new google.maps.Map(mapContainer.current, mapOptions)
+    
+    // Set initial zoom level
+    setZoomLevel(mapOptions.zoom)
+    
+    // Track zoom level changes
+    google.maps.event.addListener(map.current, 'zoom_changed', () => {
+      if (map.current) {
+        setZoomLevel(map.current.getZoom())
+      }
+    })
+    
     setMapReady(true)
-  }, [apiLoaded, mapReady])
+  }, [apiLoaded, mapReady, userLocation])
 
   useEffect(() => {
-    if (!mapReady || !map.current || !incidents || !safeZones) return
+    if (!mapReady || !map.current || !incidents || !safeZones || !userLocation) return
 
     const google = (window as any).google
     if (!google?.maps) return
@@ -338,7 +406,7 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
     // Add user location marker (blue pulse marker)
     userMarkerRef.current = new google.maps.Marker({
       map: map.current,
-      position: DEFAULT_USER_LOCATION,
+      position: userLocation,
       title: "Your Location",
       icon: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
     })
@@ -347,8 +415,8 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
     // (route prop takes precedence, e.g., when user clicks on a safe zone)
     if (!route) {
       const evacuationRoute = generateEvacuationRoute(
-        DEFAULT_USER_LOCATION.lat,
-        DEFAULT_USER_LOCATION.lng,
+        userLocation.lat,
+        userLocation.lng,
         safeZones,
         incidents,
       )
@@ -370,7 +438,7 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
         })
       }
     }
-  }, [mapReady, incidents, safeZones, route])
+  }, [mapReady, incidents, safeZones, route, userLocation])
 
   // Display route when route prop is provided
   useEffect(() => {
@@ -395,11 +463,11 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
         strokeWeight: 4,
         map: map.current,
       })
-    } else if (selectedSafeZone) {
+    } else if (selectedSafeZone && userLocation) {
       // If no polyline but we have a selected safe zone, draw direct line
       polylineRef.current = new google.maps.Polyline({
         path: [
-          DEFAULT_USER_LOCATION,
+          userLocation,
           { lat: selectedSafeZone.latitude, lng: selectedSafeZone.longitude },
         ],
         geodesic: true,
@@ -409,7 +477,7 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
         map: map.current,
       })
     }
-  }, [route, mapReady, selectedSafeZone])
+  }, [route, mapReady, selectedSafeZone, userLocation])
 
   // Render incidents
   useEffect(() => {
@@ -429,10 +497,13 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
       const color = getIncidentColor(incident.severity, incident.status === "verified")
       const isVerified = incident.status === "verified"
 
+      // Use the same radius calculation as heatmap (based on hazard type)
+      const radiusMeters = getRadiusForHazardType(incident.hazard_type, incident.id)
+
       // Draw circle for impact radius
       const circle = new google.maps.Circle({
         center: position,
-        radius: incident.impact_radius * 1000,
+        radius: radiusMeters, // Radius in meters, same as heatmap
         fillColor: color,
         fillOpacity: isVerified ? 0.15 : 0.08,
         strokeColor: color,
@@ -467,32 +538,113 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
     const google = (window as any).google
     if (!google?.maps?.visualization) return
 
-    if (mode === "heatmap" && !heatmapLayer.current) {
-      const heatmapData = incidents
-        .filter((inc: Incident) => inc.severity !== "low")
-        .map((inc: Incident) => {
-          const weight = inc.severity === "critical" ? 1 : inc.severity === "high" ? 0.7 : 0.4
+    if (mode === "heatmap") {
+      const filteredIncidents = incidents.filter((inc: Incident) => inc.severity !== "low")
+      
+      // Convert meters to pixels based on zoom level and latitude
+      // Formula: metersPerPixel = (156543.03392 * cos(lat)) / 2^zoom
+      const centerLat = map.current.getCenter()?.lat() || userLocation?.lat || DEFAULT_USER_LOCATION.lat
+      const metersPerPixel = (156543.03392 * Math.cos((centerLat * Math.PI) / 180)) / Math.pow(2, zoomLevel)
+
+      // Custom gradient for darker colors in overlapping areas
+      // Colors go from transparent blue (low) to red (high density/overlap)
+      const gradient = [
+        "rgba(0, 255, 255, 0)",      // Transparent cyan (no data)
+        "rgba(0, 255, 255, 0.5)",    // Light cyan (low density)
+        "rgba(0, 255, 0, 0.5)",      // Green (medium-low)
+        "rgba(255, 255, 0, 0.7)",    // Yellow (medium)
+        "rgba(255, 165, 0, 0.8)",    // Orange (medium-high)
+        "rgba(255, 0, 0, 0.9)",      // Red (high density/overlap)
+        "rgba(139, 0, 0, 1)",        // Dark red (very high density/overlap)
+      ]
+
+      // Group incidents by their radius (rounded to nearest 25m for better precision)
+      const incidentGroups = new Map<number, Array<Incident>>()
+      
+      filteredIncidents.forEach((inc: Incident) => {
+        const radiusMeters = getRadiusForHazardType(inc.hazard_type, inc.id)
+        // Round to nearest 25m for grouping (smaller interval for better precision)
+        const roundedRadius = Math.round(radiusMeters / 25) * 25
+        if (!incidentGroups.has(roundedRadius)) {
+          incidentGroups.set(roundedRadius, [])
+        }
+        incidentGroups.get(roundedRadius)!.push(inc)
+      })
+
+      // Clear old heatmap layers
+      heatmapLayers.current.forEach((layer) => {
+        layer.setMap(null)
+      })
+      heatmapLayers.current.clear()
+
+      // Create a heatmap layer for each radius group
+      incidentGroups.forEach((group, radiusMeters) => {
+        // Calculate base weights and overlap weights for this group
+        const heatmapData = group.map((inc: Incident) => {
+          // Base weight based on severity
+          const baseWeight = inc.severity === "critical" ? 1 : inc.severity === "high" ? 0.7 : 0.4
+          
+          // Calculate overlap weight - count nearby incidents within radius
+          let overlapCount = 0
+          const incidentRadius = getRadiusForHazardType(inc.hazard_type, inc.id)
+          
+          filteredIncidents.forEach((otherInc: Incident) => {
+            if (inc.id !== otherInc.id) {
+              const distance = calculateDistance(
+                inc.latitude,
+                inc.longitude,
+                otherInc.latitude,
+                otherInc.longitude
+              ) * 1000 // Convert to meters
+              
+              // Check if other incident is within this incident's radius
+              if (distance < incidentRadius) {
+                overlapCount++
+              }
+            }
+          })
+          
+          // Increase weight based on overlap (each overlap adds to the intensity)
+          // Cap the multiplier to prevent excessive weights
+          const overlapMultiplier = Math.min(1 + (overlapCount * 0.5), 3) // Max 3x weight
+          const finalWeight = baseWeight * overlapMultiplier
+          
           return {
             location: new google.maps.LatLng(inc.latitude, inc.longitude),
-            weight,
+            weight: finalWeight,
           }
         })
 
-      heatmapLayer.current = new google.maps.visualization.HeatmapLayer({
-        data: heatmapData,
-        map: map.current,
-        radius: 30,
+        // Convert radius to pixels
+        const radiusInPixels = radiusMeters / metersPerPixel
+
+        // Create heatmap layer for this radius group
+        const layer = new google.maps.visualization.HeatmapLayer({
+          data: heatmapData,
+          map: map.current,
+          radius: radiusInPixels,
+          gradient: gradient,
+        })
+
+        heatmapLayers.current.set(String(radiusMeters), layer)
       })
 
       markers.current.forEach((marker) => marker.setVisible(false))
       circles.current.forEach((circle) => circle.setVisible(false))
-    } else if (mode === "pins" && heatmapLayer.current) {
-      heatmapLayer.current.setMap(null)
-      heatmapLayer.current = null
+    } else if (mode === "pins") {
+      // Clear all heatmap layers when switching to pins mode
+      heatmapLayers.current.forEach((layer) => {
+        layer.setMap(null)
+      })
+      heatmapLayers.current.clear()
+      if (heatmapLayer.current) {
+        heatmapLayer.current.setMap(null)
+        heatmapLayer.current = null
+      }
       markers.current.forEach((marker) => marker.setVisible(true))
       circles.current.forEach((circle) => circle.setVisible(true))
     }
-  }, [mode, incidents, mapReady])
+  }, [mode, incidents, mapReady, zoomLevel, userLocation])
 
   // Safe zones
   useEffect(() => {

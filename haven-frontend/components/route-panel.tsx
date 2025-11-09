@@ -15,7 +15,7 @@ export default function RoutePanel({ route, safeZoneName, onClose }: RoutePanelP
 
   const handleSpeak = () => {
     setSpeaking(true)
-    const summary = `Route to safe zone. Distance: ${(route.distance / 1000).toFixed(1)} kilometers. Duration: approximately ${Math.round(route.duration / 60)} minutes.`
+    const summary = `Route to safe zone. Distance: ${(route.distance * 0.000621371).toFixed(1)} miles. Duration: approximately ${Math.round(route.duration / 60)} minutes.`
 
     if ("speechSynthesis" in window) {
       const utterance = new SpeechSynthesisUtterance(summary)
@@ -39,7 +39,7 @@ export default function RoutePanel({ route, safeZoneName, onClose }: RoutePanelP
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         <div className="space-y-2">
           <p className="text-sm font-medium text-slate-300">Distance</p>
-          <p className="text-2xl font-bold text-blue-400">{(route.distance / 1000).toFixed(1)} km</p>
+          <p className="text-2xl font-bold text-blue-400">{(route.distance * 0.000621371).toFixed(1)} mi</p>
         </div>
 
         <div className="space-y-2">

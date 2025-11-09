@@ -11,6 +11,8 @@ from app.models import User, Incident, HazardReport, SafeZone
 from app.utils.distance import haversine, impact_radius_for_severity
 from app.utils.geocode import geocode_address, reverse_geocode
 from app.utils.roboflow import classify_image
+from app.utils.directions import get_shortest_path
+import json
 
 bp = Blueprint('api', __name__)  # No url_prefix here - we add it in __init__.py
 
@@ -529,9 +531,11 @@ def update_safe_zone(safe_zone_id):
 def delete_safe_zone(safe_zone_id):
     """Delete a safe zone (admin only)"""
     try:
+        current_app.logger.info(f"Attempting to delete safe zone with ID: {safe_zone_id} (type: {type(safe_zone_id).__name__})")
         safe_zone = SafeZone.query.get(safe_zone_id)
         if not safe_zone:
-            return jsonify({'error': 'Safe zone not found'}), 404
+            current_app.logger.warning(f"Safe zone {safe_zone_id} not found in database")
+            return jsonify({'error': f'Safe zone with ID {safe_zone_id} not found'}), 404
         
         db.session.delete(safe_zone)
         db.session.commit()
@@ -597,50 +601,83 @@ def get_route():
                     best_dist = dist
                     best_zone = zone
         
-        # Construct Google Maps URL
-        google_maps_url = (
-            f"https://www.google.com/maps/dir/?api=1"
-            f"&origin={from_lat},{from_lng}"
-            f"&destination={best_zone.latitude},{best_zone.longitude}"
-        )
-        
-        # Calculate distance and estimated duration
-        distance_m = best_dist
-        distance_km = distance_m / 1000.0
-        # Estimate duration: walking speed ~5 km/h
-        duration_seconds = int((distance_km / 5.0) * 3600)
-        duration_minutes = int(duration_seconds / 60)
-        
-        # Format response to match frontend Route interface
-        response = {
-            'safe_zone': best_zone.to_dict(),
-            'route': {
-                'distance': distance_m,  # meters
-                'duration': duration_seconds,  # seconds
-                'distance_text': f'{distance_km:.2f} km',
-                'duration_text': f'{duration_minutes} min',
-                'steps': [
-                    {
-                        'instruction': f'Head towards {best_zone.name}',
-                        'distance': distance_m,
-                        'duration': duration_seconds
-                    },
-                    {
-                        'instruction': 'Follow Google Maps directions',
-                        'distance': 0,
-                        'duration': 0
-                    },
-                    {
-                        'instruction': f'Arrive at {best_zone.name}',
-                        'distance': 0,
-                        'duration': 0
-                    }
-                ],
-                'google_maps_url': google_maps_url
+        # Get actual route using Google Maps Directions API
+        try:
+            route_data = get_shortest_path(
+                from_lat, from_lng,
+                best_zone.latitude, best_zone.longitude
+            )
+            
+            # Construct Google Maps URL
+            google_maps_url = (
+                f"https://www.google.com/maps/dir/?api=1"
+                f"&origin={from_lat},{from_lng}"
+                f"&destination={best_zone.latitude},{best_zone.longitude}"
+            )
+            
+            # Format response to match frontend Route interface
+            # Note: polyline is already a list of {lat, lng} dicts, Flask will serialize it
+            response = {
+                'safe_zone': best_zone.to_dict(),
+                'route': {
+                    'distance': route_data['distance_meters'],  # meters
+                    'duration': route_data['duration_seconds'],  # seconds
+                    'steps': route_data['steps'],
+                    'polyline': json.dumps(route_data['polyline']),  # JSON string for frontend decodePolyline
+                    'google_maps_url': google_maps_url
+                }
             }
-        }
-        
-        return jsonify(response)
+            
+            return jsonify(response)
+            
+        except Exception as route_error:
+            # Fallback to simple straight-line route if Google Maps API fails
+            current_app.logger.warning(f"Google Maps API error, using fallback: {str(route_error)}")
+            
+            # Construct Google Maps URL
+            google_maps_url = (
+                f"https://www.google.com/maps/dir/?api=1"
+                f"&origin={from_lat},{from_lng}"
+                f"&destination={best_zone.latitude},{best_zone.longitude}"
+            )
+            
+            # Calculate distance and estimated duration (fallback)
+            distance_m = best_dist
+            distance_km = distance_m / 1000.0
+            # Estimate duration: driving speed ~50 km/h
+            duration_seconds = int((distance_km / 50.0) * 3600)
+            duration_minutes = int(duration_seconds / 60)
+            
+            # Simple polyline (straight line) as fallback
+            fallback_polyline = json.dumps([
+                {'lat': from_lat, 'lng': from_lng},
+                {'lat': best_zone.latitude, 'lng': best_zone.longitude}
+            ])
+            
+            # Format response to match frontend Route interface
+            response = {
+                'safe_zone': best_zone.to_dict(),
+                'route': {
+                    'distance': distance_m,  # meters
+                    'duration': duration_seconds,  # seconds
+                    'steps': [
+                        {
+                            'instruction': f'Head towards {best_zone.name}',
+                            'distance': distance_m,
+                            'duration': duration_seconds
+                        },
+                        {
+                            'instruction': f'Arrive at {best_zone.name}',
+                            'distance': 0,
+                            'duration': 0
+                        }
+                    ],
+                    'polyline': fallback_polyline,
+                    'google_maps_url': google_maps_url
+                }
+            }
+            
+            return jsonify(response)
         
     except Exception as e:
         current_app.logger.error(f"Error getting route: {str(e)}", exc_info=True)
