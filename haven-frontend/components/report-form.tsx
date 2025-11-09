@@ -10,13 +10,19 @@ interface ReportFormProps {
   onSubmit: (result: any) => void
 }
 
+// Default coordinates to prepopulate
+const DEFAULT_COORDINATES = {
+  lat: 18.465940,
+  lng: -77.919340,
+}
+
 export default function ReportForm({ onSubmit }: ReportFormProps) {
   const [image, setImage] = useState<File | null>(null)
   const [preview, setPreview] = useState<string>("")
   const [description, setDescription] = useState("")
   const [useCurrentLocation, setUseCurrentLocation] = useState(false)
-  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null)
-  const [address, setAddress] = useState("")
+  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(DEFAULT_COORDINATES)
+  const [address, setAddress] = useState(`${DEFAULT_COORDINATES.lat}, ${DEFAULT_COORDINATES.lng}`)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const fileInputRef = useRef<HTMLInputElement>(null)

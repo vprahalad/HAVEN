@@ -1,16 +1,18 @@
 "use client"
 
 import useSWR from "swr"
-import { AlertTriangle, Clock } from "lucide-react"
+import { AlertTriangle, Clock, ChevronDown, ChevronUp, Menu } from "lucide-react"
 import { getIncidents } from "@/lib/api"
 import type { Incident } from "@/lib/types"
 
 interface IncidentListProps {
   selectedIncident: Incident | null
   onSelectIncident: (incident: Incident) => void
+  isMinimized?: boolean
+  onToggleMinimize?: () => void
 }
 
-export default function IncidentList({ selectedIncident, onSelectIncident }: IncidentListProps) {
+export default function IncidentList({ selectedIncident, onSelectIncident, isMinimized = false, onToggleMinimize }: IncidentListProps) {
   const { data: incidents } = useSWR("/api/incidents", () => getIncidents(), {
     refreshInterval: 5000,
   })
@@ -25,10 +27,50 @@ export default function IncidentList({ selectedIncident, onSelectIncident }: Inc
     (a: Incident, b: Incident) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   )
 
+  if (isMinimized) {
+    return (
+      <div className="bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden flex flex-col h-full">
+        <button
+          onClick={onToggleMinimize}
+          className="border-b border-slate-700 bg-slate-900/50 px-3 py-3 flex items-center justify-center hover:bg-slate-800/50 transition-colors"
+          title="Expand incidents list"
+        >
+          <Menu className="w-5 h-5 text-slate-300" />
+        </button>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-xs text-slate-400 mb-1">Incidents</div>
+            <div className="text-lg font-semibold text-slate-200">{sorted.length}</div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden flex flex-col h-full">
-      <div className="border-b border-slate-700 bg-slate-900/50 px-4 py-3">
+      <div className="border-b border-slate-700 bg-slate-900/50 px-4 py-3 flex items-center justify-between">
         <h2 className="font-semibold text-slate-100">Recent Incidents</h2>
+        {onToggleMinimize && (
+          <button
+            onClick={onToggleMinimize}
+            className="p-1.5 hover:bg-slate-700/50 rounded transition-colors md:hidden"
+            title="Minimize"
+            aria-label="Minimize incidents list"
+          >
+            <ChevronDown className="w-4 h-4 text-slate-300" />
+          </button>
+        )}
+        {onToggleMinimize && (
+          <button
+            onClick={onToggleMinimize}
+            className="p-1.5 hover:bg-slate-700/50 rounded transition-colors hidden md:block"
+            title="Minimize"
+            aria-label="Minimize incidents list"
+          >
+            <ChevronUp className="w-4 h-4 text-slate-300" />
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto">

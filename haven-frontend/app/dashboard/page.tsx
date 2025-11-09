@@ -7,6 +7,7 @@ import IncidentDetail from "@/components/incident-detail"
 import TopNav from "@/components/top-nav"
 import FloatingActions from "@/components/floating-actions"
 import RoutePanel from "@/components/route-panel"
+import LocationPicker from "@/components/location-picker"
 import { getRoute } from "@/lib/api"
 import type { Incident, Route, SafeZone } from "@/lib/types"
 
@@ -16,29 +17,71 @@ const DEFAULT_USER_LOCATION = {
   lng: -73.9855,
 }
 
+const STORAGE_KEY = "haven_user_starting_location"
+
 export default function DashboardPage() {
-  const [showHeatmap, setShowHeatmap] = useState(false)
+  const [showHeatmap, setShowHeatmap] = useState(true)
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null)
   const [route, setRoute] = useState<Route | null>(null)
   const [selectedSafeZone, setSelectedSafeZone] = useState<SafeZone | null>(null)
   const [routeLoading, setRouteLoading] = useState(false)
+  const [showLocationPicker, setShowLocationPicker] = useState(false)
+  const [isIncidentsMinimized, setIsIncidentsMinimized] = useState(false)
+  const [isRouteMinimized, setIsRouteMinimized] = useState(false)
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number }>(DEFAULT_USER_LOCATION)
 
-  // Get user's current location on mount
+  // Load saved location from localStorage on mount
   useEffect(() => {
+    // Check if we're in the browser (not SSR)
+    if (typeof window === 'undefined') return
+
+    const savedLocation = localStorage.getItem(STORAGE_KEY)
+    if (savedLocation) {
+      try {
+        const parsed = JSON.parse(savedLocation)
+        if (parsed.lat && parsed.lng) {
+          setUserLocation(parsed)
+          return // Don't use geolocation if we have a saved location
+        }
+      } catch (e) {
+        console.error("Failed to parse saved location:", e)
+      }
+    }
+
+    // If no saved location, try to get current location
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          setUserLocation({
+          const location = {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
-          })
+          }
+          setUserLocation(location)
+          // Save to localStorage
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(location))
+          }
         },
         (error) => {
           console.error("Geolocation error:", error)
           // Keep default location if geolocation fails
         }
       )
+    }
+  }, [])
+
+  // Save location to localStorage whenever it changes
+  const handleLocationChange = useCallback((location: { lat: number; lng: number } | null) => {
+    if (location) {
+      setUserLocation(location)
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(location))
+      }
+    } else {
+      setUserLocation(DEFAULT_USER_LOCATION)
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(STORAGE_KEY)
+      }
     }
   }, [])
 
@@ -101,21 +144,33 @@ export default function DashboardPage() {
             route={route}
             onSafeZoneSelect={handleSafeZoneSelect}
             selectedSafeZone={selectedSafeZone}
+            userLocation={userLocation}
           />
           <FloatingActions 
             onHeatmapToggle={setShowHeatmap} 
-            showHeatmap={showHeatmap} 
+            showHeatmap={showHeatmap}
+            userLocation={userLocation}
             onRouteFound={(route, safeZone) => {
               setRoute(route)
               if (safeZone) {
                 setSelectedSafeZone(safeZone)
               }
-            }} 
+            }}
+            onLocationClick={() => setShowLocationPicker(true)}
           />
+          {showLocationPicker && (
+            <div className="absolute top-4 left-4 right-4 md:right-auto md:w-96 z-30">
+              <LocationPicker
+                location={userLocation}
+                onLocationChange={handleLocationChange}
+                onClose={() => setShowLocationPicker(false)}
+              />
+            </div>
+          )}
         </div>
 
         {/* Side Panel */}
-        <div className="w-full md:w-80 flex flex-col gap-4 order-1 md:order-2">
+        <div className={`${(isIncidentsMinimized || isRouteMinimized) ? 'w-auto md:w-12' : 'w-full md:w-80'} flex flex-col gap-4 order-1 md:order-2 transition-all duration-300`}>
           {routeLoading ? (
             <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-8 flex items-center justify-center">
               <p className="text-slate-300">Loading route...</p>
@@ -124,9 +179,12 @@ export default function DashboardPage() {
             <RoutePanel 
               route={route} 
               safeZoneName={selectedSafeZone?.name}
+              isMinimized={isRouteMinimized}
+              onToggleMinimize={() => setIsRouteMinimized(!isRouteMinimized)}
               onClose={() => {
                 setRoute(null)
                 setSelectedSafeZone(null)
+                setIsRouteMinimized(false)
               }} 
             />
           ) : selectedIncident ? (
@@ -134,7 +192,12 @@ export default function DashboardPage() {
               <IncidentDetail incident={selectedIncident} onClose={handleCloseIncident} isAdmin={false} />
             </div>
           ) : (
-            <IncidentList selectedIncident={selectedIncident} onSelectIncident={handleIncidentSelect} />
+            <IncidentList 
+              selectedIncident={selectedIncident} 
+              onSelectIncident={handleIncidentSelect}
+              isMinimized={isIncidentsMinimized}
+              onToggleMinimize={() => setIsIncidentsMinimized(!isIncidentsMinimized)}
+            />
           )}
         </div>
       </div>

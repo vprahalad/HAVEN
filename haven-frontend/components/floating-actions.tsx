@@ -2,44 +2,31 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Camera, Navigation, HeaterIcon as HeatmapIcon } from "lucide-react"
+import { Camera, Navigation, HeaterIcon as HeatmapIcon, MapPin } from "lucide-react"
 import { getRoute } from "@/lib/api"
 import type { Route, SafeZone } from "@/lib/types"
 
 interface FloatingActionsProps {
   onHeatmapToggle: (show: boolean) => void
   showHeatmap: boolean
+  userLocation: { lat: number; lng: number }
   onRouteFound: (route: Route, safeZone?: SafeZone) => void
+  onLocationClick: () => void
 }
 
-export default function FloatingActions({ onHeatmapToggle, showHeatmap, onRouteFound }: FloatingActionsProps) {
+export default function FloatingActions({ onHeatmapToggle, showHeatmap, userLocation, onRouteFound, onLocationClick }: FloatingActionsProps) {
   const [findingRoute, setFindingRoute] = useState(false)
 
   const handleFindRoute = async () => {
     setFindingRoute(true)
     try {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          async (position) => {
-            try {
-              // Call API without safeZoneId to find nearest safe zone with safe path
-              // Backend will try closest safe zones until it finds one with a safe route
-              const response = await getRoute(position.coords.latitude, position.coords.longitude)
-              // Display the route and safe zone - route will be shown on the map
-              onRouteFound(response.route, response.safe_zone)
-            } catch (error) {
-              console.error("Route fetch error:", error)
-              alert("Unable to calculate a safe route. Please try again or ensure there are active safe zones available.")
-            }
-          },
-          (error) => {
-            console.error("Geolocation error:", error)
-            alert("Unable to get your location. Please enable location services and try again.")
-          },
-        )
-      } else {
-        alert("Geolocation is not supported by your browser.")
-      }
+      // Use the set user location instead of geolocation
+      const response = await getRoute(userLocation.lat, userLocation.lng)
+      // Display the route and safe zone - route will be shown on the map
+      onRouteFound(response.route, response.safe_zone)
+    } catch (error) {
+      console.error("Route fetch error:", error)
+      alert("Unable to calculate a safe route. Please try again or ensure there are active safe zones available.")
     } finally {
       setFindingRoute(false)
     }
@@ -58,6 +45,19 @@ export default function FloatingActions({ onHeatmapToggle, showHeatmap, onRouteF
         </button>
         <div className="absolute bottom-full right-0 mb-2 px-3 py-2 bg-slate-800 text-white text-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
           Find Safe Route
+        </div>
+      </div>
+
+      <div className="relative group">
+        <button
+          onClick={onLocationClick}
+          className="bg-green-600 hover:bg-green-700 text-white rounded-full p-4 shadow-lg transition-all flex items-center gap-2 hover:shadow-xl hover:scale-110"
+          title="Set starting location"
+        >
+          <MapPin className="w-5 h-5" />
+        </button>
+        <div className="absolute bottom-full right-0 mb-2 px-3 py-2 bg-slate-800 text-white text-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          Set Starting Location
         </div>
       </div>
 

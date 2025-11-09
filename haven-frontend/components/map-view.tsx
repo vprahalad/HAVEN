@@ -13,6 +13,7 @@ interface MapViewProps {
   route?: Route | null
   onSafeZoneSelect?: (safeZone: SafeZone) => void
   selectedSafeZone?: SafeZone | null
+  userLocation?: { lat: number; lng: number } | null
 }
 
 // Color helpers
@@ -216,7 +217,7 @@ const decodePolyline = (polyline: string): Array<{ lat: number; lng: number }> =
   }
 }
 
-export default function MapView({ mode, selectedIncident, onIncidentSelect, route, onSafeZoneSelect, selectedSafeZone }: MapViewProps) {
+export default function MapView({ mode, selectedIncident, onIncidentSelect, route, onSafeZoneSelect, selectedSafeZone, userLocation: userLocationProp }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<any>(null)
   const markers = useRef<Map<string, any>>(new Map())
@@ -229,7 +230,9 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
   const [mapReady, setMapReady] = useState(false)
   const [apiLoaded, setApiLoaded] = useState(false)
   const [zoomLevel, setZoomLevel] = useState(11)
-  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null)
+  
+  // Use prop if provided, otherwise use default
+  const userLocation = userLocationProp || DEFAULT_USER_LOCATION
 
   // Helper function to get radius range in meters based on hazard type
   // Uses a seeded random based on incident ID to ensure consistency
@@ -459,6 +462,7 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
     if (route && route.polyline) {
       const waypoints = decodePolyline(route.polyline)
       if (waypoints.length > 0) {
+        // Create polyline
         polylineRef.current = new google.maps.Polyline({
           path: waypoints.map((wp) => ({ lat: wp.lat, lng: wp.lng })),
           geodesic: true,
@@ -467,6 +471,22 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
           strokeWeight: 4,
           map: map.current,
         })
+
+        // Fit map bounds to show the entire route
+        const bounds = new google.maps.LatLngBounds()
+        waypoints.forEach((wp) => {
+          bounds.extend(new google.maps.LatLng(wp.lat, wp.lng))
+        })
+        
+        // Add padding, especially for mobile where route panel might be visible
+        const padding = {
+          top: 20,
+          right: 20,
+          bottom: 150, // Extra bottom padding for mobile route panel
+          left: 20,
+        }
+        
+        map.current.fitBounds(bounds, padding)
       }
     }
   }, [route, mapReady])
