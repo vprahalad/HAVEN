@@ -4,12 +4,12 @@ import { useState } from "react"
 import Link from "next/link"
 import { Camera, Navigation, HeaterIcon as HeatmapIcon } from "lucide-react"
 import { getRoute } from "@/lib/api"
-import type { Route } from "@/lib/types"
+import type { Route, SafeZone } from "@/lib/types"
 
 interface FloatingActionsProps {
   onHeatmapToggle: (show: boolean) => void
   showHeatmap: boolean
-  onRouteFound: (route: Route) => void
+  onRouteFound: (route: Route, safeZone?: SafeZone) => void
 }
 
 export default function FloatingActions({ onHeatmapToggle, showHeatmap, onRouteFound }: FloatingActionsProps) {
@@ -22,35 +22,23 @@ export default function FloatingActions({ onHeatmapToggle, showHeatmap, onRouteF
         navigator.geolocation.getCurrentPosition(
           async (position) => {
             try {
+              // Call API without safeZoneId to find nearest safe zone with safe path
+              // Backend will try closest safe zones until it finds one with a safe route
               const response = await getRoute(position.coords.latitude, position.coords.longitude)
-              onRouteFound(response.route)
+              // Display the route and safe zone - route will be shown on the map
+              onRouteFound(response.route, response.safe_zone)
             } catch (error) {
               console.error("Route fetch error:", error)
-              // Show mock route for demo
-              const mockRoute: Route = {
-                distance: 2500,
-                duration: 600,
-                steps: [
-                  { instruction: "Head north on current street", distance: 500, duration: 120 },
-                  { instruction: "Turn right towards safe zone", distance: 1200, duration: 300 },
-                  { instruction: "Arrive at Central Park North", distance: 800, duration: 180 },
-                ],
-              }
-              onRouteFound(mockRoute)
+              alert("Unable to calculate a safe route. Please try again or ensure there are active safe zones available.")
             }
           },
           (error) => {
             console.error("Geolocation error:", error)
-            alert("Unable to get your location. Using NYC center for demo.")
-            // Use NYC center as fallback
-            const mockRoute: Route = {
-              distance: 3000,
-              duration: 900,
-              steps: [{ instruction: "Navigate towards nearest safe zone", distance: 3000, duration: 900 }],
-            }
-            onRouteFound(mockRoute)
+            alert("Unable to get your location. Please enable location services and try again.")
           },
         )
+      } else {
+        alert("Geolocation is not supported by your browser.")
       }
     } finally {
       setFindingRoute(false)
