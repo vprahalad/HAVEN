@@ -441,8 +441,9 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
   }, [mapReady, incidents, safeZones, route, userLocation])
 
   // Display route when route prop is provided
+  // Route should ONLY be displayed when explicitly calculated (button click), never on initial load
   useEffect(() => {
-    if (!mapReady || !map.current || !route) return
+    if (!mapReady || !map.current) return
 
     const google = (window as any).google
     if (!google?.maps) return
@@ -450,34 +451,25 @@ export default function MapView({ mode, selectedIncident, onIncidentSelect, rout
     // Remove old polyline if exists
     if (polylineRef.current) {
       polylineRef.current.setMap(null)
+      polylineRef.current = null
     }
 
-    // Decode and display route polyline
-    const waypoints = decodePolyline(route.polyline || "")
-    if (waypoints.length > 0) {
-      polylineRef.current = new google.maps.Polyline({
-        path: waypoints.map((wp) => ({ lat: wp.lat, lng: wp.lng })),
-        geodesic: true,
-        strokeColor: "#22c55e", // Green color
-        strokeOpacity: 0.8,
-        strokeWeight: 4,
-        map: map.current,
-      })
-    } else if (selectedSafeZone && userLocation) {
-      // If no polyline but we have a selected safe zone, draw direct line
-      polylineRef.current = new google.maps.Polyline({
-        path: [
-          userLocation,
-          { lat: selectedSafeZone.latitude, lng: selectedSafeZone.longitude },
-        ],
-        geodesic: true,
-        strokeColor: "#22c55e",
-        strokeOpacity: 0.8,
-        strokeWeight: 4,
-        map: map.current,
-      })
+    // Only display route if it exists and has a valid polyline
+    // NEVER draw straight lines - only display routes calculated from Google Maps API
+    if (route && route.polyline) {
+      const waypoints = decodePolyline(route.polyline)
+      if (waypoints.length > 0) {
+        polylineRef.current = new google.maps.Polyline({
+          path: waypoints.map((wp) => ({ lat: wp.lat, lng: wp.lng })),
+          geodesic: true,
+          strokeColor: "#22c55e", // Green color
+          strokeOpacity: 0.8,
+          strokeWeight: 4,
+          map: map.current,
+        })
+      }
     }
-  }, [route, mapReady, selectedSafeZone, userLocation])
+  }, [route, mapReady])
 
   // Render incidents
   useEffect(() => {

@@ -56,49 +56,33 @@ export default function DashboardPage() {
     setSelectedSafeZone(safeZone)
     setSelectedIncident(null) // Clear incident selection when safe zone is selected
     setRouteLoading(true)
+    setRoute(null) // Clear previous route
     
     try {
       // Use the stored user location
       const userLat = userLocation.lat
       const userLng = userLocation.lng
       
-      try {
-        const response = await getRoute(userLat, userLng, safeZone.id)
-        // Use polyline from API response (already includes actual route path)
-        setRoute(response.route)
-      } catch (error) {
-        console.error("Error fetching route:", error)
-        // Fallback: create a simple route
-        const distance = Math.sqrt(
-          Math.pow((userLat - safeZone.latitude) * 111, 2) +
-          Math.pow((userLng - safeZone.longitude) * 111 * Math.cos(userLat * Math.PI / 180), 2)
-        ) * 1000 // Convert to meters
-        const routeWithPolyline: Route = {
-          distance,
-          duration: Math.round((distance / 1000 / 5) * 3600), // 5 km/h walking speed
-          steps: [
-            {
-              instruction: `Head towards ${safeZone.name}`,
-              distance,
-              duration: Math.round((distance / 1000 / 5) * 3600),
-            },
-            {
-              instruction: `Arrive at ${safeZone.name}`,
-              distance: 0,
-              duration: 0,
-            },
-          ],
-          polyline: JSON.stringify([
-            { lat: userLat, lng: userLng },
-            { lat: safeZone.latitude, lng: safeZone.longitude },
-          ]),
-        }
-        setRoute(routeWithPolyline)
-      } finally {
-        setRouteLoading(false)
+      // Calculate route to the selected safe zone
+      const response = await getRoute(userLat, userLng, safeZone.id)
+      
+      // Use polyline from API response
+      setRoute(response.route)
+      
+      // Update selected safe zone from response
+      if (response.safe_zone) {
+        setSelectedSafeZone(response.safe_zone)
+      }
+      
+      // Check if route passes through danger zones and notify user
+      if (response.route.passes_through_danger) {
+        alert("⚠️ Warning: This route passes through danger zones. Consider using the 'Find Safe Route' button to find an alternative path.")
       }
     } catch (error) {
-      console.error("Error in safe zone selection:", error)
+      console.error("Error fetching route:", error)
+      alert("Unable to calculate route. Please try again or select a different safe zone.")
+      setRoute(null)
+    } finally {
       setRouteLoading(false)
     }
   }, [userLocation])
@@ -118,7 +102,16 @@ export default function DashboardPage() {
             onSafeZoneSelect={handleSafeZoneSelect}
             selectedSafeZone={selectedSafeZone}
           />
-          <FloatingActions onHeatmapToggle={setShowHeatmap} showHeatmap={showHeatmap} onRouteFound={setRoute} />
+          <FloatingActions 
+            onHeatmapToggle={setShowHeatmap} 
+            showHeatmap={showHeatmap} 
+            onRouteFound={(route, safeZone) => {
+              setRoute(route)
+              if (safeZone) {
+                setSelectedSafeZone(safeZone)
+              }
+            }} 
+          />
         </div>
 
         {/* Side Panel */}

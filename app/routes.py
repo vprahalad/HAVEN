@@ -8,7 +8,7 @@ from flask import Blueprint, request, jsonify, send_from_directory, current_app
 from werkzeug.utils import secure_filename
 from app import db
 from app.models import User, Incident, HazardReport, SafeZone
-from app.utils.distance import haversine, impact_radius_for_severity
+from app.utils.distance import haversine, impact_radius_for_severity, get_radius_for_hazard_type
 from app.utils.geocode import geocode_address, reverse_geocode
 from app.utils.roboflow import classify_image
 from app.utils.directions import get_shortest_path
@@ -571,12 +571,27 @@ def get_route():
         except ValueError:
             return jsonify({'error': 'Invalid fromLat/fromLng'}), 400
         
-        # Find target safe zone
-        best_zone = None
-        best_dist = None
+        # Fetch ALL incidents to use as danger zones
+        obstacles = []
+        all_incidents = Incident.query.all()
+        
+        for incident in all_incidents:
+            # Use the same radius calculation as the heatmap outer loop
+            # This matches the frontend's getRadiusForHazardType function
+            radius = get_radius_for_hazard_type(incident.hazard_type, incident.id)
+            obstacles.append({
+                'lat': incident.latitude,
+                'lng': incident.longitude,
+                'radius': radius  # radius in meters (heatmap outer loop radius), capped at 500m
+            })
+        
+        current_app.logger.info(f"Routing with {len(obstacles)} danger zones to check")
+        
+        # Import the route intersection check function
+        from app.utils.directions import route_intersects_obstacles
         
         if safe_zone_id:
-            # Route to specific safe zone
+            # Route to specific safe zone (user selected a zone)
             try:
                 safe_zone_id = int(safe_zone_id)
                 best_zone = SafeZone.query.filter(
@@ -585,27 +600,166 @@ def get_route():
                 ).first()
                 if not best_zone:
                     return jsonify({'error': 'Safe zone not found or not active'}), 404
-                best_dist = haversine(from_lat, from_lng, best_zone.latitude, best_zone.longitude)
+                
+                # Calculate route to this specific safe zone
+                route_data = get_shortest_path(
+                    from_lat, from_lng,
+                    best_zone.latitude, best_zone.longitude
+                )
+                
+                # Check if route passes through any danger zones
+                route_path = route_data['path']
+                passes_through_danger = False
+                if obstacles:
+                    passes_through_danger = route_intersects_obstacles(route_path, obstacles)
+                    if passes_through_danger:
+                        current_app.logger.warning(
+                            f"Route to safe zone {best_zone.id} ({best_zone.name}) passes through danger zone(s)"
+                        )
+                    else:
+                        current_app.logger.info(
+                            f"Route to safe zone {best_zone.id} ({best_zone.name}) is safe (does not pass through danger zones)"
+                        )
+                
+                # Construct Google Maps URL
+                google_maps_url = (
+                    f"https://www.google.com/maps/dir/?api=1"
+                    f"&origin={from_lat},{from_lng}"
+                    f"&destination={best_zone.latitude},{best_zone.longitude}"
+                )
+                
+                # Format response to match frontend Route interface
+                response = {
+                    'safe_zone': best_zone.to_dict(),
+                    'route': {
+                        'distance': route_data['distance_meters'],  # meters
+                        'duration': route_data['duration_seconds'],  # seconds
+                        'steps': route_data['steps'],
+                        'polyline': json.dumps(route_data['polyline']),  # JSON string for frontend decodePolyline
+                        'google_maps_url': google_maps_url,
+                        'passes_through_danger': passes_through_danger  # Flag to notify user
+                    }
+                }
+                
+                return jsonify(response)
+                
             except (ValueError, TypeError):
                 return jsonify({'error': 'Invalid safeZoneId'}), 400
+            except Exception as route_error:
+                current_app.logger.error(f"Failed to generate route: {str(route_error)}")
+                return jsonify({
+                    'error': 'Unable to generate route. Please try again or select a different safe zone.'
+                }), 500
         else:
-            # Find nearest safe zone
+            # Find Safe Route button logic:
+            # 1. Calculate Google Maps API routes to ALL safe zones (routes that follow roads)
+            # 2. Sort by actual route distance (shortest route path length first)
+            # 3. Check each route in order for safety (does it pass through danger zones?)
+            # 4. Return first safe route found
             safe_zones = SafeZone.query.filter(SafeZone.active == True).all()
             if not safe_zones:
                 return jsonify({'error': 'No active safe zones available'}), 404
             
-            best_dist = float('inf')
+            current_app.logger.info(
+                f"Finding safe route: calculating Google Maps routes to {len(safe_zones)} safe zones"
+            )
+            
+            # Step 1: Calculate Google Maps API routes to each safe zone (routes that follow roads)
+            all_zone_routes = []
+            
             for zone in safe_zones:
-                dist = haversine(from_lat, from_lng, zone.latitude, zone.longitude)
-                if dist < best_dist:
-                    best_dist = dist
-                    best_zone = zone
-        
-        # Get actual route using Google Maps Directions API
-        try:
-            route_data = get_shortest_path(
-                from_lat, from_lng,
-                best_zone.latitude, best_zone.longitude
+                try:
+                    current_app.logger.info(
+                        f"Calculating Google Maps route to safe zone {zone.id} ({zone.name})"
+                    )
+                    
+                    # Calculate route using Google Maps Directions API (follows roads, not straight line)
+                    route_data = get_shortest_path(
+                        from_lat, from_lng,
+                        zone.latitude, zone.longitude
+                    )
+                    
+                    # Store route with zone and actual route distance
+                    all_zone_routes.append({
+                        'zone': zone,
+                        'route_data': route_data,
+                        'route_distance': route_data['distance_meters']  # Actual route distance from Google Maps
+                    })
+                    
+                except Exception as route_error:
+                    current_app.logger.warning(
+                        f"Failed to generate Google Maps route to zone {zone.id} ({zone.name}): {str(route_error)}"
+                    )
+                    continue  # Skip this zone if route calculation fails
+            
+            if not all_zone_routes:
+                current_app.logger.error("Failed to calculate Google Maps routes to any safe zone")
+                return jsonify({
+                    'error': 'Unable to calculate routes to any safe zone. Please try again.'
+                }), 500
+            
+            # Step 2: Sort by actual Google Maps route distance (shortest route path length first)
+            all_zone_routes.sort(key=lambda x: x['route_distance'])
+            
+            # Log sorted routes
+            route_summary = []
+            for r in all_zone_routes[:5]:
+                route_summary.append(
+                    f"zone {r['zone'].id} ({r['zone'].name}): {r['route_distance']}m route"
+                )
+            current_app.logger.info(
+                f"Google Maps routes sorted by route distance: {', '.join(route_summary)}"
+            )
+            
+            # Step 3: Check each route in order (shortest route distance first) for safety
+            best_route = None
+            for route_info in all_zone_routes:
+                zone = route_info['zone']
+                route_data = route_info['route_data']
+                route_path = route_data['path']  # This is the Google Maps route that follows roads
+                
+                current_app.logger.info(
+                    f"Checking route to safe zone {zone.id} ({zone.name}): "
+                    f"{route_data['distance_meters']}m route distance"
+                )
+                
+                # Check if this Google Maps route passes through any danger zones
+                if obstacles:
+                    intersects = route_intersects_obstacles(route_path, obstacles)
+                    if intersects:
+                        current_app.logger.warning(
+                            f"Google Maps route to safe zone {zone.id} ({zone.name}) at {route_data['distance_meters']}m "
+                            f"passes through danger zone(s), checking next route"
+                        )
+                        continue  # This route is unsafe, check next one
+                    else:
+                        current_app.logger.debug(
+                            f"Google Maps route to safe zone {zone.id} ({zone.name}) does NOT pass through any danger zones"
+                        )
+                
+                # Found first safe route!
+                best_route = route_info
+                current_app.logger.info(
+                    f"✓ Found safe Google Maps route to zone {zone.id} ({zone.name}): "
+                    f"{route_data['distance_meters']}m route distance"
+                )
+                break  # Stop checking, we found the first safe route
+            
+            if not best_route:
+                current_app.logger.error(
+                    f"Could not find a safe route to any of {len(all_zone_routes)} safe zones"
+                )
+                return jsonify({
+                    'error': 'Unable to find a safe route to any safe zone. All routes pass through danger zones.'
+                }), 500
+            
+            # Step 4: Return the first safe route found
+            best_zone = best_route['zone']
+            route_data = best_route['route_data']
+            
+            current_app.logger.info(
+                f"Returning safe Google Maps route to zone {best_zone.id} ({best_zone.name}): "
+                f"{route_data['distance_meters']}m route distance"
             )
             
             # Construct Google Maps URL
@@ -616,7 +770,6 @@ def get_route():
             )
             
             # Format response to match frontend Route interface
-            # Note: polyline is already a list of {lat, lng} dicts, Flask will serialize it
             response = {
                 'safe_zone': best_zone.to_dict(),
                 'route': {
@@ -624,56 +777,8 @@ def get_route():
                     'duration': route_data['duration_seconds'],  # seconds
                     'steps': route_data['steps'],
                     'polyline': json.dumps(route_data['polyline']),  # JSON string for frontend decodePolyline
-                    'google_maps_url': google_maps_url
-                }
-            }
-            
-            return jsonify(response)
-            
-        except Exception as route_error:
-            # Fallback to simple straight-line route if Google Maps API fails
-            current_app.logger.warning(f"Google Maps API error, using fallback: {str(route_error)}")
-            
-            # Construct Google Maps URL
-            google_maps_url = (
-                f"https://www.google.com/maps/dir/?api=1"
-                f"&origin={from_lat},{from_lng}"
-                f"&destination={best_zone.latitude},{best_zone.longitude}"
-            )
-            
-            # Calculate distance and estimated duration (fallback)
-            distance_m = best_dist
-            distance_km = distance_m / 1000.0
-            # Estimate duration: driving speed ~50 km/h
-            duration_seconds = int((distance_km / 50.0) * 3600)
-            duration_minutes = int(duration_seconds / 60)
-            
-            # Simple polyline (straight line) as fallback
-            fallback_polyline = json.dumps([
-                {'lat': from_lat, 'lng': from_lng},
-                {'lat': best_zone.latitude, 'lng': best_zone.longitude}
-            ])
-            
-            # Format response to match frontend Route interface
-            response = {
-                'safe_zone': best_zone.to_dict(),
-                'route': {
-                    'distance': distance_m,  # meters
-                    'duration': duration_seconds,  # seconds
-                    'steps': [
-                        {
-                            'instruction': f'Head towards {best_zone.name}',
-                            'distance': distance_m,
-                            'duration': duration_seconds
-                        },
-                        {
-                            'instruction': f'Arrive at {best_zone.name}',
-                            'distance': 0,
-                            'duration': 0
-                        }
-                    ],
-                    'polyline': fallback_polyline,
-                    'google_maps_url': google_maps_url
+                    'google_maps_url': google_maps_url,
+                    'passes_through_danger': False  # This route is safe (does not pass through danger zones)
                 }
             }
             

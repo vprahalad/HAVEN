@@ -35,20 +35,72 @@ def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 def impact_radius_for_severity(severity: str) -> float:
     """
     Map severity to impact radius in meters.
+    Maximum radius is capped at 500 meters.
     
     Args:
         severity: Severity level (low, medium, high)
     
     Returns:
-        Impact radius in meters
+        Impact radius in meters (capped at 500m)
     """
     severity = (severity or "").lower()
     severity_map = {
         'low': 100,
         'medium': 300,
-        'high': 1000,
-        'critical': 1500
+        'high': 500,  # Capped at 500m
+        'critical': 500  # Capped at 500m
     }
-    return severity_map.get(severity, 300)  # Default to medium
+    radius = severity_map.get(severity, 300)  # Default to medium
+    # Ensure radius never exceeds 500m
+    return min(radius, 500.0)
+
+
+def get_radius_for_hazard_type(hazard_type: str, incident_id) -> float:
+    """
+    Get radius for hazard type based on the same logic as frontend heatmap outer loop.
+    Uses a seeded random based on incident ID to ensure consistency.
+    This matches the frontend's getRadiusForHazardType function exactly.
+    
+    Args:
+        hazard_type: Type of hazard (fire, earthquake, sinkhole, flood, etc.)
+        incident_id: Incident ID for seeded random calculation
+    
+    Returns:
+        Radius in meters (capped at 500m)
+    """
+    import math
+    
+    normalized_type = (hazard_type or "").lower().strip()
+    
+    # Create a simple seeded random function based on incident ID (matches frontend exactly)
+    # Frontend: const seed = String(incidentId).split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)
+    seed = sum(ord(char) for char in str(incident_id))
+    # Frontend: const seededRandom = () => { const x = Math.sin(seed) * 10000; return x - Math.floor(x); }
+    x = math.sin(seed) * 10000
+    seeded_random = x - math.floor(x)
+    
+    # Set min/max radius based on hazard type (matches frontend)
+    min_radius = 100
+    max_radius = 1000
+    
+    if "forestfire" in normalized_type or "forest fire" in normalized_type or "fire" in normalized_type:
+        min_radius = 100
+        max_radius = 1000
+    elif "earthquake" in normalized_type:
+        min_radius = 100
+        max_radius = 1000
+    elif "sinkhole" in normalized_type:
+        min_radius = 25
+        max_radius = 100
+    elif "flooding" in normalized_type or "flood" in normalized_type:
+        min_radius = 100
+        max_radius = 1000
+    
+    # Calculate radius using seeded random (matches frontend)
+    # Frontend: return seededRandom() * (maxRadius - minRadius) + minRadius
+    radius = seeded_random * (max_radius - min_radius) + min_radius
+    
+    # Cap at 500m maximum (as per user requirement)
+    return min(radius, 500.0)
 
 

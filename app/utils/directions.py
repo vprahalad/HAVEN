@@ -3,6 +3,7 @@ Google Maps Directions API utility for route planning
 """
 import os
 import re
+import math
 import requests
 from flask import current_app
 
@@ -53,6 +54,119 @@ def decode_polyline(encoded_polyline):
         coordinates.append((lat / 1e5, lng / 1e5))
     
     return coordinates
+
+
+def haversine_distance(lat1, lng1, lat2, lng2):
+    """Calculate distance between two points using Haversine formula"""
+    R = 6371000  # Earth radius in meters
+    lat1_rad = math.radians(lat1)
+    lat2_rad = math.radians(lat2)
+    delta_lat = math.radians(lat2 - lat1)
+    delta_lng = math.radians(lng2 - lng1)
+    
+    a = (math.sin(delta_lat / 2) ** 2 +
+         math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lng / 2) ** 2)
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    
+    return R * c
+
+
+def route_intersects_obstacles(route_path, obstacles, step_size=50):
+    """
+    Check if a route path intersects any obstacles (including their radius).
+    
+    Args:
+        route_path: List of (lat, lng) tuples representing the route
+        obstacles: List of obstacles, each with 'lat', 'lng', and 'radius' (in meters)
+        step_size: Distance in meters between samples along route (larger = faster, less thorough)
+    
+    Returns:
+        True if route intersects any obstacle, False otherwise
+    """
+    if not obstacles or not route_path or len(route_path) < 2:
+        current_app.logger.debug("No obstacles or invalid route path - no intersection")
+        return False
+    
+    current_app.logger.debug(
+        f"Checking route with {len(route_path)} points against {len(obstacles)} obstacles"
+    )
+    
+
+    # Check each point in the route path directly (Google Maps already provides dense enough points)
+    # This is more efficient and accurate than interpolating
+    intersection_count = 0
+    for point_idx, point in enumerate(route_path):
+        point_lat, point_lng = point
+        
+        # Check if this route point is within any obstacle's radius
+        for obstacle_idx, obstacle in enumerate(obstacles):
+            if 'lat' not in obstacle or 'lng' not in obstacle:
+                continue
+            
+            obs_lat = obstacle['lat']
+            obs_lng = obstacle['lng']
+            radius = obstacle.get('radius', 100)  # Default 100m if not specified
+            # Cap radius at 500m maximum
+            radius = min(radius, 500.0)
+            
+            # Check if route point is within obstacle radius
+            distance = haversine_distance(point_lat, point_lng, obs_lat, obs_lng)
+            
+            # Only consider it an intersection if the point is clearly within the radius
+            # Use strict < to avoid edge cases with floating point precision
+            if distance < radius:
+                intersection_count += 1
+                current_app.logger.info(
+                    f"INTERSECTION FOUND: Route point {point_idx} ({point_lat:.6f}, {point_lng:.6f}) is "
+                    f"{distance:.1f}m from obstacle {obstacle_idx} ({obs_lat:.6f}, {obs_lng:.6f}) "
+                    f"with radius {radius}m"
+                )
+                return True
+    
+    # Also check segments between points for routes that might pass through obstacles
+    # but don't have points directly in them (only for longer segments)
+    for i in range(len(route_path) - 1):
+        lat1, lng1 = route_path[i]
+        lat2, lng2 = route_path[i + 1]
+        
+        # Calculate distance of this segment
+        segment_dist = haversine_distance(lat1, lng1, lat2, lng2)
+        
+        # Only sample if segment is longer than step_size
+        if segment_dist > step_size:
+            # Number of samples along this segment
+            num_samples = max(2, int(segment_dist / step_size))
+            
+            # Check sample points along the segment
+            for j in range(1, num_samples):  # Skip first and last (already checked above)
+                t = j / num_samples
+                sample_lat = lat1 + t * (lat2 - lat1)
+                sample_lng = lng1 + t * (lng2 - lng1)
+                
+                # Check if this sample point is within any obstacle's radius
+                for obstacle_idx, obstacle in enumerate(obstacles):
+                    if 'lat' not in obstacle or 'lng' not in obstacle:
+                        continue
+                    
+                    obs_lat = obstacle['lat']
+                    obs_lng = obstacle['lng']
+                    radius = obstacle.get('radius', 100)
+                    # Cap radius at 500m maximum
+                    radius = min(radius, 500.0)
+                    
+                    distance = haversine_distance(sample_lat, sample_lng, obs_lat, obs_lng)
+                    if distance < radius:
+                        current_app.logger.info(
+                            f"INTERSECTION FOUND: Route segment sample ({sample_lat:.6f}, {sample_lng:.6f}) is "
+                            f"{distance:.1f}m from obstacle {obstacle_idx} ({obs_lat:.6f}, {obs_lng:.6f}) "
+                            f"with radius {radius}m"
+                        )
+                        return True
+    
+    current_app.logger.debug(
+        f"Route check complete: {len(route_path)} points checked, no intersections found"
+    )
+    return False
 
 
 def get_shortest_path(start_lat, start_lng, end_lat, end_lng):
