@@ -19,7 +19,10 @@ def create_app(config_class=Config):
     
     # Configure CORS
     cors_origins = app.config.get('CORS_ORIGINS', '*')
-    CORS(app, origins=cors_origins)
+    if cors_origins == '*':
+        CORS(app, origins='*')
+    else:
+        CORS(app, origins=cors_origins)
 
     # Import models to ensure they're registered with SQLAlchemy
     # This must happen after db.init_app() but before db.create_all()

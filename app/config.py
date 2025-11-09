@@ -12,11 +12,22 @@ class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
     
     # Database
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///haven.db'
+    # Handle both postgres:// and postgresql:// connection strings
+    database_url = os.environ.get('DATABASE_URL') or 'sqlite:///haven.db'
+    # Convert postgres:// to postgresql:// for SQLAlchemy compatibility
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    SQLALCHEMY_DATABASE_URI = database_url
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # CORS
-    CORS_ORIGINS = os.environ.get('FRONTEND_ORIGIN', '*').split(',')
+    # Handle comma-separated origins or single origin
+    frontend_origin = os.environ.get('FRONTEND_ORIGIN', '*')
+    if frontend_origin == '*':
+        CORS_ORIGINS = '*'
+    else:
+        # Split by comma and strip whitespace
+        CORS_ORIGINS = [origin.strip() for origin in frontend_origin.split(',')]
     
     # Roboflow
     ROBOFLOW_API_KEY = os.environ.get('ROBOFLOW_API_KEY', '')
